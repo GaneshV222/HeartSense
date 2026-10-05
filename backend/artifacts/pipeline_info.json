@@ -1,0 +1,44 @@
+{
+  "dataset_rows_raw": 303,
+  "dataset_cols_raw": 14,
+  "dataset_rows_clean": 303,
+  "smote": {
+    "before": {
+      "0": 164,
+      "1": 139
+    },
+    "after": {
+      "0": 164,
+      "1": 164
+    },
+    "samples_before": 303,
+    "samples_after": 328
+  },
+  "feature_selection": {
+    "selected": [
+      "age",
+      "sex",
+      "cp",
+      "chol",
+      "thalach",
+      "exang",
+      "oldpeak",
+      "slope",
+      "ca",
+      "thal"
+    ],
+    "removed": [
+      "trestbps",
+      "fbs",
+      "restecg"
+    ],
+    "k": 10
+  },
+  "split": {
+    "train_size": 262,
+    "test_size": 66,
+    "total": 328,
+    "test_ratio": 0.2
+  },
+  "best_model": "Naive Bayes"
+}

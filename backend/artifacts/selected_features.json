@@ -1,0 +1,50 @@
+{
+  "original_features": [
+    "age",
+    "sex",
+    "cp",
+    "trestbps",
+    "chol",
+    "fbs",
+    "restecg",
+    "thalach",
+    "exang",
+    "oldpeak",
+    "slope",
+    "ca",
+    "thal"
+  ],
+  "selected_features": [
+    "age",
+    "sex",
+    "cp",
+    "chol",
+    "thalach",
+    "exang",
+    "oldpeak",
+    "slope",
+    "ca",
+    "thal"
+  ],
+  "removed_features": [
+    "trestbps",
+    "fbs",
+    "restecg"
+  ],
+  "feature_scores": {
+    "age": 0.032,
+    "sex": 0.0435,
+    "cp": 0.1369,
+    "trestbps": 0.0,
+    "chol": 0.1006,
+    "fbs": 0.0224,
+    "restecg": 0.0277,
+    "thalach": 0.0741,
+    "exang": 0.1062,
+    "oldpeak": 0.0896,
+    "slope": 0.0847,
+    "ca": 0.1451,
+    "thal": 0.1595
+  },
+  "k": 10
+}

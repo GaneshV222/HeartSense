@@ -1,0 +1,52 @@
+{
+  "Logistic Regression": {
+    "model_name": "Logistic Regression",
+    "best_params": {},
+    "best_cv_score": null
+  },
+  "Random Forest": {
+    "model_name": "Random Forest",
+    "best_params": {
+      "max_depth": null,
+      "min_samples_leaf": 1,
+      "min_samples_split": 5,
+      "n_estimators": 100
+    },
+    "best_cv_score": 0.915
+  },
+  "Decision Tree": {
+    "model_name": "Decision Tree",
+    "best_params": {
+      "criterion": "gini",
+      "max_depth": 10,
+      "min_samples_leaf": 4,
+      "min_samples_split": 10
+    },
+    "best_cv_score": 0.8589
+  },
+  "SVM": {
+    "model_name": "SVM",
+    "best_params": {
+      "C": 1,
+      "gamma": "scale",
+      "kernel": "linear"
+    },
+    "best_cv_score": 0.8925
+  },
+  "KNN": {
+    "model_name": "KNN",
+    "best_params": {
+      "metric": "manhattan",
+      "n_neighbors": 9,
+      "weights": "distance"
+    },
+    "best_cv_score": 0.8182
+  },
+  "Naive Bayes": {
+    "model_name": "Naive Bayes",
+    "best_params": {
+      "var_smoothing": 1e-06
+    },
+    "best_cv_score": 0.8865
+  }
+}

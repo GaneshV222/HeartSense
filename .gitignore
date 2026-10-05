@@ -1,0 +1,41 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Artifacts (tracked selectively)
+artifacts/*.joblib
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Node
+node_modules/
