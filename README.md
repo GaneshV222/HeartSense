@@ -145,3 +145,4 @@ HeartSense/
 
 ## 19. Disclaimer
 This assessment tool is for research and decision-support purposes only. It is **not** a medical diagnosis. Consult a qualified healthcare professional for medical advice.
+
