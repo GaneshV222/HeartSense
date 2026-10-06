@@ -176,7 +176,7 @@ export default function Assessment() {
               Sample Patient IDs from Ingested Dataset:
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-              {['45263', '49851', '30395', '98758', '95571', '10901', '194', '98910'].map((sampleId) => (
+              {['P56393', 'P4505', 'P46414', 'P36228', 'P31853', 'P100355'].map((sampleId) => (
                 <button
                   key={sampleId}
                   type="button"
@@ -197,7 +197,7 @@ export default function Assessment() {
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  ID #{sampleId}
+                  {sampleId}
                 </button>
               ))}
             </div>

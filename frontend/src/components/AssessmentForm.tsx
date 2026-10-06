@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity } from 'lucide-react';
 import { assessRisk } from '../services/api';
@@ -57,10 +57,10 @@ export default function AssessmentForm() {
               value={formData.patientCode}
               onChange={handleChange}
               required
-              placeholder="e.g. 45263 or ID #45263"
+              placeholder="e.g. P4505 or P001"
               autoComplete="off"
             />
-            <small style={{ color: '#718096', display: 'block', marginTop: '0.35rem' }}>Use a clean numeric or alphanumeric ID; spaces and prefixes are stripped automatically.</small>
+            <small style={{ color: '#718096', display: 'block', marginTop: '0.35rem' }}>Use a clean alphanumeric ID (e.g. P4505); spaces and prefixes are stripped automatically.</small>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}><label>Name</label><input type="text" className="input-field" name="patientName" value={formData.patientName} onChange={handleChange} placeholder="optional" /></div>
         </div>

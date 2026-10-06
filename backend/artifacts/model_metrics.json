@@ -1,28 +1,28 @@
 {
-  "model_name": "LightGBM",
+  "model_name": "XGBoost",
   "model_type": "ML Ensemble",
-  "accuracy": 0.8512,
-  "precision": 0.8527,
-  "recall": 0.8512,
-  "specificity": 0.8839,
-  "f1": 0.851,
-  "roc_auc": 0.9303,
-  "pr_auc": 0.9412,
+  "accuracy": 0.8442,
+  "precision": 0.8467,
+  "recall": 0.8442,
+  "specificity": 0.8869,
+  "f1": 0.8439,
+  "roc_auc": 0.9235,
+  "pr_auc": 0.9364,
   "confusion_matrix": {
-    "tn": 12386,
-    "fp": 1627,
-    "fn": 2544,
-    "tp": 11468,
+    "tn": 12410,
+    "fp": 1583,
+    "fn": 2777,
+    "tp": 11216,
     "matrix": [
       [
-        12386,
-        1627
+        12410,
+        1583
       ],
       [
-        2544,
-        11468
+        2777,
+        11216
       ]
     ]
   },
-  "training_time_seconds": 1.14
+  "training_time_seconds": 1.34
 }

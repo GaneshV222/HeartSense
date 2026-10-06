@@ -1,16 +1,19 @@
 """
 HeartSense – TemporalFeatureService
 
-The single authoritative temporal feature calculation and persistence service.
-Encapsulates all logic for the 10 core temporal clinical variables:
-  - 8 Numerical: Systolic BP, Diastolic BP, Cholesterol, LDL, HDL, BMI, HbA1c, Resting Heart Rate (current, previous, delta = current - previous)
-  - 2 Categorical: Smoking Status, Physical Activity (current, previous, changed boolean flag)
+The single authoritative temporal feature calculation, persistence, and retrieval service.
+Encapsulates all logic for the critical cardiovascular features:
+  - 8 Numerical: Systolic BP, Diastolic BP, Cholesterol, LDL, HDL, BMI, HbA1c, Resting Heart Rate
+    (Current, Previous, Change = Current - Previous, Rate = Change / days_between_visits)
+  - 2 Lifestyle: Smoking, Physical Activity
+    (Current, Previous, Changed boolean flag)
 
 Rules:
-  - Previous values MUST come from the immediately preceding chronological visit of the SAME patient_id.
-  - If a patient has only 1 visit (first visit): previous = NULL, delta = NULL, changed = NULL/false.
-  - Missing previous visit is NEVER treated as delta = 0.
-  - Historical snapshots are never overwritten; every visit produces a new temporal snapshot.
+  - temporal_patient_data contains ONLY the latest two visits per patient.
+  - Previous values MUST come from the immediately preceding chronological visit of the SAME patient.
+  - If a patient has only 1 visit (first visit): previous = NULL, change = NULL, rate = NULL, changed = NULL.
+  - Missing previous visit is NEVER treated as change = 0.
+  - Upsert strategy ensures exactly one row per patient in temporal_patient_data.
 """
 
 from datetime import datetime
@@ -18,26 +21,17 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-# Exact 10 temporal variables
-NUMERICAL_VARIABLES = [
-    "systolic_bp",
-    "diastolic_bp",
-    "cholesterol",
-    "ldl",
-    "hdl",
-    "bmi",
-    "hba1c",
-    "resting_heart_rate",
-]
+from app.models import PatientVisit, TemporalPatientData
+from app.config import (
+    CRITICAL_NUMERICAL_FEATURES,
+    CRITICAL_LIFESTYLE_FEATURES,
+    ALL_10_TEMPORAL_VARIABLES,
+)
 
-CATEGORICAL_VARIABLES = [
-    "smoking_status",
-    "physical_activity",
-]
+NUMERICAL_VARIABLES = CRITICAL_NUMERICAL_FEATURES
+CATEGORICAL_VARIABLES = CRITICAL_LIFESTYLE_FEATURES
 
-ALL_10_TEMPORAL_VARIABLES = NUMERICAL_VARIABLES + CATEGORICAL_VARIABLES
-
-NUMERICAL_DELTA_FIELDS = [f"delta_{var}" for var in NUMERICAL_VARIABLES]
+NUMERICAL_DELTA_FIELDS = [f"delta_{var}" for var in NUMERICAL_VARIABLES] + [f"{var}_change" for var in NUMERICAL_VARIABLES]
 CATEGORICAL_CHANGED_FIELDS = [f"{var}_changed" for var in CATEGORICAL_VARIABLES]
 
 VARIABLE_METADATA = {
@@ -49,6 +43,7 @@ VARIABLE_METADATA = {
     "bmi": {"label": "Body Mass Index (BMI)", "unit": "kg/m²", "type": "numerical"},
     "hba1c": {"label": "Glycated Hemoglobin (HbA1c)", "unit": "%", "type": "numerical"},
     "resting_heart_rate": {"label": "Resting Heart Rate", "unit": "bpm", "type": "numerical"},
+    "smoking": {"label": "Smoking Status", "unit": "", "type": "categorical"},
     "smoking_status": {"label": "Smoking Status", "unit": "", "type": "categorical"},
     "physical_activity": {"label": "Physical Activity Level", "unit": "", "type": "categorical"},
 }
@@ -80,15 +75,15 @@ def normalize_smoking_value(val: Any) -> Optional[str]:
         return None
     low = s.lower()
     if low in {"1", "true", "yes", "smoker"}:
-        return "Yes"
+        return "True"
     if low in {"0", "false", "no", "non-smoker"}:
-        return "No"
+        return "False"
     return s.capitalize()
 
 
 class TemporalFeatureService:
     """
-    Authoritative service for computing, storing, and retrieving longitudinal temporal features.
+    Authoritative service for computing, upserting, and retrieving temporal patient data.
     """
 
     @staticmethod
@@ -96,25 +91,48 @@ class TemporalFeatureService:
         current_data: Dict[str, Any],
         previous_data: Optional[Dict[str, Any]],
         patient_id: str,
-        visit_id: Optional[int] = None,
-        assessment_date: Optional[datetime] = None,
+        current_visit_id: Optional[int] = None,
+        previous_visit_id: Optional[int] = None,
+        current_visit_date: Optional[datetime] = None,
+        previous_visit_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """
-        Calculate the exact 10 temporal clinical features given a current visit and
-        an optional immediately preceding visit for the SAME patient.
+        Calculate temporal changes and rates between current visit and immediately preceding visit.
         """
-        assessment_date = assessment_date or datetime.utcnow()
+        current_dt = current_visit_date or current_data.get("visit_date")
+        if isinstance(current_dt, str):
+            try:
+                current_dt = datetime.fromisoformat(current_dt.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                current_dt = None
+
+        prev_dt = previous_visit_date or (previous_data.get("visit_date") if previous_data else None)
+        if isinstance(prev_dt, str):
+            try:
+                prev_dt = datetime.fromisoformat(prev_dt.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                prev_dt = None
+
         is_first_visit = (previous_data is None or len(previous_data) == 0)
+
+        # Days between visits
+        days_between: Optional[float] = None
+        if not is_first_visit and current_dt and prev_dt:
+            diff_days = (current_dt - prev_dt).total_seconds() / 86400.0
+            days_between = max(round(diff_days, 1), 1.0)
 
         snapshot: Dict[str, Any] = {
             "patient_id": str(patient_id),
-            "visit_id": visit_id,
-            "assessment_date": assessment_date,
+            "current_visit_id": current_visit_id or current_data.get("id") or current_data.get("visit_id"),
+            "previous_visit_id": previous_visit_id or (previous_data.get("id") or previous_data.get("visit_id") if previous_data else None),
+            "current_visit_date": current_dt,
+            "previous_visit_date": prev_dt,
+            "days_between_visits": days_between,
             "is_first_visit": is_first_visit,
             "has_previous_visit": not is_first_visit,
         }
 
-        # ── 1. Calculate 8 Numerical Deltas ──────────────────────────────────
+        # ── 1. Calculate 8 Critical Numerical Changes and Rates ──────────────
         numerical_details: Dict[str, Dict[str, Optional[float]]] = {}
         for var in NUMERICAL_VARIABLES:
             curr_raw = current_data.get(var)
@@ -123,55 +141,70 @@ class TemporalFeatureService:
 
             if is_first_visit or previous_data is None:
                 prev_val = None
-                delta_val = None
+                change_val = None
+                rate_val = None
             else:
                 prev_raw = previous_data.get(var)
                 prev_val = _safe_float(prev_raw)
                 if curr_val is not None and prev_val is not None:
-                    delta_val = round(curr_val - prev_val, 2)
+                    change_val = round(curr_val - prev_val, 2)
+                    if days_between is not None and days_between > 0:
+                        rate_val = round(change_val / days_between, 4)
+                    else:
+                        rate_val = 0.0
                 else:
-                    delta_val = None
+                    change_val = None
+                    rate_val = None
 
             snapshot[f"previous_{var}"] = prev_val
-            snapshot[f"delta_{var}"] = delta_val
+            snapshot[f"prev_{var}"] = prev_val
+            snapshot[f"{var}_change"] = change_val
+            snapshot[f"delta_{var}"] = change_val
+            snapshot[f"{var}_rate"] = rate_val
 
             numerical_details[var] = {
                 "previous": prev_val,
                 "current": curr_val,
-                "delta": delta_val,
-                "unit": VARIABLE_METADATA[var]["unit"],
-                "label": VARIABLE_METADATA[var]["label"],
+                "change": change_val,
+                "delta": change_val,
+                "rate": rate_val,
+                "unit": VARIABLE_METADATA.get(var, {}).get("unit", ""),
+                "label": VARIABLE_METADATA.get(var, {}).get("label", var),
             }
 
-        # ── 2. Calculate 2 Categorical Changes ────────────────────────────────
+        # ── 2. Calculate 2 Critical Lifestyle Changes ────────────────────────
         categorical_details: Dict[str, Dict[str, Any]] = {}
 
-        # 9. Smoking Status
-        curr_smoke_raw = current_data.get("smoking_status") or current_data.get("smoking")
+        # Smoking
+        curr_smoke_raw = current_data.get("smoking") or current_data.get("smoking_status")
         curr_smoke = normalize_smoking_value(curr_smoke_raw)
+        snapshot["current_smoking"] = curr_smoke
         snapshot["current_smoking_status"] = curr_smoke
 
         if is_first_visit or previous_data is None:
             prev_smoke = None
             smoke_changed = None
         else:
-            prev_smoke_raw = previous_data.get("smoking_status") or previous_data.get("smoking")
+            prev_smoke_raw = previous_data.get("smoking") or previous_data.get("smoking_status")
             prev_smoke = normalize_smoking_value(prev_smoke_raw)
             if curr_smoke is not None and prev_smoke is not None:
                 smoke_changed = bool(curr_smoke.lower() != prev_smoke.lower())
             else:
                 smoke_changed = None
 
+        snapshot["previous_smoking"] = prev_smoke
+        snapshot["prev_smoking"] = prev_smoke
         snapshot["previous_smoking_status"] = prev_smoke
+        snapshot["smoking_changed"] = smoke_changed
         snapshot["smoking_status_changed"] = smoke_changed
-        categorical_details["smoking_status"] = {
+        categorical_details["smoking"] = {
             "previous": prev_smoke,
             "current": curr_smoke,
             "changed": smoke_changed,
-            "label": VARIABLE_METADATA["smoking_status"]["label"],
+            "label": "Smoking Status",
         }
 
-        # 10. Physical Activity
+        # Physical Activity
         curr_act = _safe_str(current_data.get("physical_activity"))
         if curr_act:
             curr_act = curr_act.capitalize()
@@ -190,12 +223,13 @@ class TemporalFeatureService:
                 act_changed = None
 
         snapshot["previous_physical_activity"] = prev_act
+        snapshot["prev_physical_activity"] = prev_act
         snapshot["physical_activity_changed"] = act_changed
         categorical_details["physical_activity"] = {
             "previous": prev_act,
             "current": curr_act,
             "changed": act_changed,
-            "label": VARIABLE_METADATA["physical_activity"]["label"],
+            "label": "Physical Activity Level",
         }
 
         snapshot["numerical_details"] = numerical_details
@@ -213,17 +247,16 @@ class TemporalFeatureService:
         """
         Find the immediately preceding visit for the EXACT SAME patient_id.
         ORDER BY visit_date DESC, id DESC LIMIT 1.
-        Never compares across different patients.
         """
         query = """
-            SELECT id, source_patient_id, visit_date, visit_timestamp,
+            SELECT id, patient_id, visit_number, visit_date, visit_timestamp,
                    age, gender, bmi, chest_pain_type, systolic_bp, diastolic_bp,
                    resting_heart_rate, max_heart_rate, cholesterol, hdl, ldl,
                    fasting_blood_sugar, hba1c, diabetes, resting_ecg, exercise_angina,
                    oldpeak, st_slope, num_major_vessels, thalassemia, smoking,
-                   smoking_status, family_history, physical_activity, stress_level, target
+                   smoking_status, family_history, physical_activity, stress_level, prediction
             FROM patient_visits
-            WHERE source_patient_id = :pid
+            WHERE patient_id = :pid
         """
         params: Dict[str, Any] = {"pid": str(patient_id)}
 
@@ -242,88 +275,68 @@ class TemporalFeatureService:
         return None
 
     @staticmethod
-    def persist_temporal_snapshot(
+    def upsert_temporal_patient_data(
         session: Session,
-        snapshot: Dict[str, Any]
-    ) -> int:
+        patient_id: str,
+        current_visit: Dict[str, Any] | PatientVisit,
+        previous_visit: Optional[Dict[str, Any] | PatientVisit] = None,
+    ) -> TemporalPatientData:
         """
-        Persist temporal snapshot into patient_temporal_features table.
-        Safe insert: does NOT delete or overwrite previous snapshots.
+        Upsert the single temporal record for this patient in temporal_patient_data table.
+        Contains ONLY the latest two visits (previous and current).
         """
-        insert_query = text("""
-            INSERT INTO patient_temporal_features (
-                patient_id, visit_id, assessment_date,
-                previous_systolic_bp, current_systolic_bp, delta_systolic_bp,
-                previous_diastolic_bp, current_diastolic_bp, delta_diastolic_bp,
-                previous_cholesterol, current_cholesterol, delta_cholesterol,
-                previous_ldl, current_ldl, delta_ldl,
-                previous_hdl, current_hdl, delta_hdl,
-                previous_bmi, current_bmi, delta_bmi,
-                previous_hba1c, current_hba1c, delta_hba1c,
-                previous_resting_heart_rate, current_resting_heart_rate, delta_resting_heart_rate,
-                previous_smoking_status, current_smoking_status, smoking_status_changed,
-                previous_physical_activity, current_physical_activity, physical_activity_changed,
-                created_at, updated_at
-            )
-            VALUES (
-                :patient_id, :visit_id, :assessment_date,
-                :previous_systolic_bp, :current_systolic_bp, :delta_systolic_bp,
-                :previous_diastolic_bp, :current_diastolic_bp, :delta_diastolic_bp,
-                :previous_cholesterol, :current_cholesterol, :delta_cholesterol,
-                :previous_ldl, :current_ldl, :delta_ldl,
-                :previous_hdl, :current_hdl, :delta_hdl,
-                :previous_bmi, :current_bmi, :delta_bmi,
-                :previous_hba1c, :current_hba1c, :delta_hba1c,
-                :previous_resting_heart_rate, :current_resting_heart_rate, :delta_resting_heart_rate,
-                :previous_smoking_status, :current_smoking_status, :smoking_status_changed,
-                :previous_physical_activity, :current_physical_activity, :physical_activity_changed,
-                :created_at, :updated_at
-            )
-            RETURNING id
-        """)
+        cur_dict = current_visit if isinstance(current_visit, dict) else current_visit.to_feature_dict()
+        prev_dict = (
+            previous_visit if isinstance(previous_visit, dict)
+            else (previous_visit.to_feature_dict() if previous_visit else None)
+        )
 
-        now = datetime.utcnow()
-        params = {
-            "patient_id": str(snapshot["patient_id"]),
-            "visit_id": snapshot.get("visit_id"),
-            "assessment_date": snapshot.get("assessment_date") or now,
-            "previous_systolic_bp": snapshot.get("previous_systolic_bp"),
-            "current_systolic_bp": snapshot.get("current_systolic_bp"),
-            "delta_systolic_bp": snapshot.get("delta_systolic_bp"),
-            "previous_diastolic_bp": snapshot.get("previous_diastolic_bp"),
-            "current_diastolic_bp": snapshot.get("current_diastolic_bp"),
-            "delta_diastolic_bp": snapshot.get("delta_diastolic_bp"),
-            "previous_cholesterol": snapshot.get("previous_cholesterol"),
-            "current_cholesterol": snapshot.get("current_cholesterol"),
-            "delta_cholesterol": snapshot.get("delta_cholesterol"),
-            "previous_ldl": snapshot.get("previous_ldl"),
-            "current_ldl": snapshot.get("current_ldl"),
-            "delta_ldl": snapshot.get("delta_ldl"),
-            "previous_hdl": snapshot.get("previous_hdl"),
-            "current_hdl": snapshot.get("current_hdl"),
-            "delta_hdl": snapshot.get("delta_hdl"),
-            "previous_bmi": snapshot.get("previous_bmi"),
-            "current_bmi": snapshot.get("current_bmi"),
-            "delta_bmi": snapshot.get("delta_bmi"),
-            "previous_hba1c": snapshot.get("previous_hba1c"),
-            "current_hba1c": snapshot.get("current_hba1c"),
-            "delta_hba1c": snapshot.get("delta_hba1c"),
-            "previous_resting_heart_rate": snapshot.get("previous_resting_heart_rate"),
-            "current_resting_heart_rate": snapshot.get("current_resting_heart_rate"),
-            "delta_resting_heart_rate": snapshot.get("delta_resting_heart_rate"),
-            "previous_smoking_status": snapshot.get("previous_smoking_status"),
-            "current_smoking_status": snapshot.get("current_smoking_status"),
-            "smoking_status_changed": snapshot.get("smoking_status_changed"),
-            "previous_physical_activity": snapshot.get("previous_physical_activity"),
-            "current_physical_activity": snapshot.get("current_physical_activity"),
-            "physical_activity_changed": snapshot.get("physical_activity_changed"),
-            "created_at": now,
-            "updated_at": now,
-        }
+        cur_id = cur_dict.get("id") or cur_dict.get("visit_id")
+        prev_id = prev_dict.get("id") or prev_dict.get("visit_id") if prev_dict else None
 
-        new_id = session.execute(insert_query, params).scalar()
-        session.commit()
-        return new_id or 0
+        cur_date = cur_dict.get("visit_date")
+        prev_date = prev_dict.get("visit_date") if prev_dict else None
+
+        snapshot = TemporalFeatureService.calculate_snapshot(
+            current_data=cur_dict,
+            previous_data=prev_dict,
+            patient_id=str(patient_id),
+            current_visit_id=cur_id,
+            previous_visit_id=prev_id,
+            current_visit_date=cur_date,
+            previous_visit_date=prev_date,
+        )
+
+        temp_record = session.query(TemporalPatientData).filter_by(patient_id=str(patient_id)).first()
+        if not temp_record:
+            temp_record = TemporalPatientData(patient_id=str(patient_id))
+            session.add(temp_record)
+
+        temp_record.current_visit_id = snapshot["current_visit_id"]
+        temp_record.previous_visit_id = snapshot["previous_visit_id"]
+        temp_record.current_visit_date = snapshot["current_visit_date"]
+        temp_record.previous_visit_date = snapshot["previous_visit_date"]
+        temp_record.days_between_visits = snapshot["days_between_visits"]
+
+        # Critical numerical features
+        for var in NUMERICAL_VARIABLES:
+            setattr(temp_record, f"current_{var}", snapshot.get(f"current_{var}"))
+            setattr(temp_record, f"previous_{var}", snapshot.get(f"previous_{var}"))
+            setattr(temp_record, f"{var}_change", snapshot.get(f"{var}_change"))
+            setattr(temp_record, f"{var}_rate", snapshot.get(f"{var}_rate"))
+
+        # Lifestyle features
+        temp_record.current_smoking = snapshot.get("current_smoking")
+        temp_record.previous_smoking = snapshot.get("previous_smoking")
+        temp_record.smoking_changed = snapshot.get("smoking_changed")
+
+        temp_record.current_physical_activity = snapshot.get("current_physical_activity")
+        temp_record.previous_physical_activity = snapshot.get("previous_physical_activity")
+        temp_record.physical_activity_changed = snapshot.get("physical_activity_changed")
+
+        temp_record.updated_at = datetime.utcnow()
+        session.flush()
+        return temp_record
 
     @staticmethod
     def get_patient_temporal_timeline(
@@ -332,17 +345,17 @@ class TemporalFeatureService:
     ) -> List[Dict[str, Any]]:
         """
         Retrieve complete chronological visit timeline for patient_id,
-        calculating or retrieving the temporal snapshot for each visit.
+        calculating the temporal snapshot for each visit relative to its immediate predecessor.
         """
         visits_query = text("""
-            SELECT id, source_patient_id, visit_date, visit_timestamp,
+            SELECT id, patient_id, visit_number, visit_date, visit_timestamp,
                    age, gender, bmi, chest_pain_type, systolic_bp, diastolic_bp,
                    resting_heart_rate, max_heart_rate, cholesterol, hdl, ldl,
                    fasting_blood_sugar, hba1c, diabetes, resting_ecg, exercise_angina,
                    oldpeak, st_slope, num_major_vessels, thalassemia, smoking,
-                   smoking_status, family_history, physical_activity, stress_level, target
+                   smoking_status, family_history, physical_activity, stress_level, prediction
             FROM patient_visits
-            WHERE source_patient_id = :pid
+            WHERE patient_id = :pid
             ORDER BY visit_date ASC, id ASC
         """)
         rows = session.execute(visits_query, {"pid": str(patient_id)}).mappings().all()
@@ -357,11 +370,13 @@ class TemporalFeatureService:
                 current_data=curr_v,
                 previous_data=prev_v,
                 patient_id=str(patient_id),
-                visit_id=curr_v.get("id"),
-                assessment_date=curr_v.get("visit_date"),
+                current_visit_id=curr_v.get("id"),
+                previous_visit_id=prev_v.get("id") if prev_v else None,
+                current_visit_date=curr_v.get("visit_date"),
+                previous_visit_date=prev_v.get("visit_date") if prev_v else None,
             )
             timeline.append({
-                "visit_number": i + 1,
+                "visit_number": curr_v.get("visit_number") or (i + 1),
                 "visit_id": curr_v.get("id"),
                 "visit_date": curr_v["visit_date"].isoformat() if curr_v.get("visit_date") else None,
                 "clinical_values": curr_v,
@@ -380,33 +395,33 @@ class TemporalFeatureService:
 
         multi_res = session.execute(text("""
             SELECT COUNT(*) FROM (
-                SELECT source_patient_id FROM patient_visits
-                GROUP BY source_patient_id HAVING COUNT(*) > 1
+                SELECT patient_id FROM patient_visits
+                GROUP BY patient_id HAVING COUNT(*) > 1
             ) s
         """)).scalar() or 0
 
         single_res = session.execute(text("""
             SELECT COUNT(*) FROM (
-                SELECT source_patient_id FROM patient_visits
-                GROUP BY source_patient_id HAVING COUNT(*) = 1
+                SELECT patient_id FROM patient_visits
+                GROUP BY patient_id HAVING COUNT(*) = 1
             ) s
         """)).scalar() or 0
 
         max_visits = session.execute(text("""
             SELECT COALESCE(MAX(cnt), 1) FROM (
-                SELECT COUNT(*) as cnt FROM patient_visits GROUP BY source_patient_id
+                SELECT COUNT(*) as cnt FROM patient_visits GROUP BY patient_id
             ) s
         """)).scalar() or 1
 
         avg_visits = round(float(total_visits) / float(max(total_patients, 1)), 2)
 
-        temporal_snapshots_count = session.execute(text(
-            "SELECT COUNT(*) FROM patient_temporal_features"
+        temporal_records_count = session.execute(text(
+            "SELECT COUNT(*) FROM temporal_patient_data"
         )).scalar() or 0
 
         numeric_deltas_available = session.execute(text("""
-            SELECT COUNT(*) FROM patient_temporal_features
-            WHERE delta_systolic_bp IS NOT NULL
+            SELECT COUNT(*) FROM temporal_patient_data
+            WHERE systolic_bp_change IS NOT NULL
         """)).scalar() or 0
 
         return {
@@ -416,7 +431,8 @@ class TemporalFeatureService:
             "patients_with_one_visit": int(single_res),
             "average_visits_per_patient": float(avg_visits),
             "maximum_visits_per_patient": int(max_visits),
-            "temporal_snapshots": int(temporal_snapshots_count),
+            "temporal_snapshots": int(temporal_records_count),
+            "temporal_records_count": int(temporal_records_count),
             "numeric_delta_availability": int(numeric_deltas_available),
             "temporal_variables_count": 10,
             "numerical_delta_features_count": 8,

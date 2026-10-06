@@ -1,7 +1,7 @@
 """
 HeartSense – Risk Service
 
-Orchestrates the dynamic / temporal risk assessment by combining
+Orchestrates dynamic / temporal risk assessment by combining
 the patient service, prediction service, and temporal feature extraction.
 """
 
@@ -12,19 +12,19 @@ from app.services.patient_service import (
     create_patient,
     create_visit,
     create_prediction,
-    get_patient_by_code,
+    get_patient_by_id,
     get_patient_visits,
     get_latest_visit,
     get_previous_visit,
 )
 from app.services.prediction_service import predict_single
 from app.ml.temporal import compute_temporal_changes, summarize_risk_changes
-from app.config import FEATURE_NAMES
+from app.config import BASELINE_FEATURE_COLS
 
 
 def assess_patient_risk(
     session: Session,
-    patient_code: str,
+    patient_id: str,
     clinical_values: dict,
     visit_date: datetime | None = None,
     patient_name: str | None = None,
@@ -41,26 +41,35 @@ def assess_patient_risk(
     7. Return comprehensive assessment result
     """
     visit_date = visit_date or datetime.utcnow()
+    pid = str(patient_id)
 
     # 1. Patient
-    patient = create_patient(session, patient_code, name=patient_name)
+    patient = create_patient(
+        session,
+        patient_id=pid,
+        name=patient_name,
+        gender=clinical_values.get("gender"),
+        age=clinical_values.get("age"),
+    )
 
     # 2. Previous visit
-    prev_visit = get_latest_visit(session, patient.id)
+    prev_visit = get_latest_visit(session, pid)
 
     # 3. New visit
-    visit = create_visit(session, patient.id, visit_date, clinical_values)
+    visit = create_visit(session, pid, visit_date, clinical_values)
 
     # 4. Prediction
-    pred_result = predict_single(clinical_values)
+    pred_result = predict_single(clinical_values, patient_id=pid)
 
     # 5. Store prediction
     create_prediction(
         session,
-        patient_id=patient.id,
+        patient_id=pid,
         visit_id=visit.id,
-        prediction=pred_result["prediction"],
-        probability=pred_result["probability"],
+        visit_date=visit_date,
+        prediction=pred_result["risk_prediction"],
+        probability=pred_result["risk_probability"],
+        risk_level=pred_result["risk_category"],
         model_name=pred_result["model_name"],
     )
 
@@ -86,30 +95,33 @@ def assess_patient_risk(
     }
 
 
-def get_patient_timeline(session: Session, patient_code: str) -> list[dict]:
+def get_patient_timeline(session: Session, patient_id: str) -> list[dict]:
     """
     Build a chronological timeline of visits + predictions for a patient.
-    Returns a list of dicts suitable for display in Streamlit.
     """
-    patient = get_patient_by_code(session, patient_code)
+    patient = get_patient_by_id(session, str(patient_id))
     if not patient:
         return []
 
-    visits = get_patient_visits(session, patient.id)
+    visits = get_patient_visits(session, str(patient_id))
     timeline = []
     for v in visits:
+        pred_rec = session.query(Prediction).filter_by(visit_id=v.id).first()
         entry = {
             "visit_id": v.id,
             "timestamp": v.visit_timestamp,
+            "visit_date": v.visit_date.isoformat() if v.visit_date else None,
             "features": v.to_feature_dict(),
         }
-        if v.prediction:
-            entry["prediction"] = v.prediction.prediction
-            entry["probability"] = v.prediction.probability
-            entry["model_name"] = v.prediction.model_name
+        if pred_rec:
+            entry["prediction"] = pred_rec.prediction
+            entry["probability"] = pred_rec.probability
+            entry["model_name"] = pred_rec.model_name
+            entry["risk_level"] = pred_rec.risk_level
         else:
             entry["prediction"] = None
             entry["probability"] = None
             entry["model_name"] = None
+            entry["risk_level"] = None
         timeline.append(entry)
     return timeline

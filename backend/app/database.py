@@ -1,11 +1,10 @@
 """
 HeartSense – Database Connection
 
-SQLAlchemy engine, session factory, and table-creation utility.
+SQLAlchemy engine, session factory, and table-creation utilities.
 Requires PostgreSQL as the production database.
 """
 
-import sys
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from app.config import DATABASE_URL
@@ -48,51 +47,36 @@ def init_db():
     from app.models import Base  # imported here to avoid circular imports
     Base.metadata.create_all(bind=engine)
 
-    # Ensure indexes and compatibility columns exist idempotently
+    # Ensure indexes and tables exist idempotently
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE patient_visits ADD COLUMN IF NOT EXISTS smoking_status VARCHAR(50)"))
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS patient_temporal_features (
-                id SERIAL PRIMARY KEY,
-                patient_id VARCHAR(100) NOT NULL,
-                visit_id INTEGER,
-                assessment_date TIMESTAMP NOT NULL,
-                previous_systolic_bp FLOAT,
-                current_systolic_bp FLOAT,
-                delta_systolic_bp FLOAT,
-                previous_diastolic_bp FLOAT,
-                current_diastolic_bp FLOAT,
-                delta_diastolic_bp FLOAT,
-                previous_cholesterol FLOAT,
-                current_cholesterol FLOAT,
-                delta_cholesterol FLOAT,
-                previous_ldl FLOAT,
-                current_ldl FLOAT,
-                delta_ldl FLOAT,
-                previous_hdl FLOAT,
-                current_hdl FLOAT,
-                delta_hdl FLOAT,
-                previous_bmi FLOAT,
-                current_bmi FLOAT,
-                delta_bmi FLOAT,
-                previous_hba1c FLOAT,
-                current_hba1c FLOAT,
-                delta_hba1c FLOAT,
-                previous_resting_heart_rate FLOAT,
-                current_resting_heart_rate FLOAT,
-                delta_resting_heart_rate FLOAT,
-                previous_smoking_status VARCHAR(50),
-                current_smoking_status VARCHAR(50),
-                smoking_status_changed BOOLEAN,
-                previous_physical_activity VARCHAR(100),
-                current_physical_activity VARCHAR(100),
-                physical_activity_changed BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            CREATE INDEX IF NOT EXISTS ix_patient_visits_patient_id ON patient_visits (patient_id);
+            CREATE INDEX IF NOT EXISTS ix_patient_visits_visit_date ON patient_visits (visit_date);
+            CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id ON temporal_patient_data (patient_id);
+            CREATE INDEX IF NOT EXISTS ix_predictions_patient_id ON predictions (patient_id);
         """))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ptf_patient_id ON patient_temporal_features (patient_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ptf_assessment_date ON patient_temporal_features (assessment_date)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ptf_visit_id ON patient_temporal_features (visit_id)"))
 
     print("[Database] PostgreSQL tables created and verified successfully.")
+
+
+def reset_db_tables():
+    """Drop and recreate all tables for a clean migration to the new dataset."""
+    verify_db_connection()
+    from app.models import Base
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS patient_temporal_features CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS temporal_patient_data CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS predictions CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS model_runs CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS patient_visits CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS patients CASCADE;"))
+
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_patient_visits_patient_id ON patient_visits (patient_id);
+            CREATE INDEX IF NOT EXISTS ix_patient_visits_visit_date ON patient_visits (visit_date);
+            CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id ON temporal_patient_data (patient_id);
+            CREATE INDEX IF NOT EXISTS ix_predictions_patient_id ON predictions (patient_id);
+        """))
+    print("[Database] PostgreSQL tables reset and recreated successfully.")

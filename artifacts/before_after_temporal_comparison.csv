@@ -1,6 +1,6 @@
 model_name,model_type,before_accuracy,after_accuracy,accuracy_lift,accuracy_lift_pct,before_f1,after_f1,f1_lift,f1_lift_pct,before_roc_auc,after_roc_auc,roc_auc_lift,roc_auc_lift_val,before_recall,after_recall,recall_lift,clinical_impact
 XGBoost,ML Ensemble,0.8397,0.8442,0.0045,+0.45%,0.8395,0.8439,0.0044,+0.44%,0.9197,0.9235,0.0038,+0.0038,0.8397,0.8442,0.0045,Positive temporal trajectory gain
-Gradient Boosting,ML Ensemble,0.83,0.8368,0.0068,+0.68%,0.8298,0.8365,0.0067,+0.67%,0.9114,0.917,0.0056,+0.0056,0.83,0.8368,0.0068,Positive temporal trajectory gain
-AdaBoost,ML Ensemble,0.7433,0.7532,0.0099,+0.99%,0.7429,0.753,0.0101,+1.01%,0.8226,0.835,0.0124,+0.0124,0.7433,0.7532,0.0099,Positive temporal trajectory gain
+Gradient Boosting,ML Ensemble,0.8345,0.8398,0.0053,+0.53%,0.8344,0.8395,0.0051,+0.51%,0.9148,0.9192,0.0044,+0.0044,0.8345,0.8398,0.0053,Positive temporal trajectory gain
+AdaBoost,ML Ensemble,0.7456,0.758,0.0124,+1.24%,0.7455,0.7577,0.0122,+1.22%,0.8243,0.8403,0.016,+0.0160,0.7456,0.758,0.0124,Positive temporal trajectory gain
 LightGBM,ML Ensemble,0.8395,0.8434,0.0039,+0.39%,0.8393,0.8431,0.0038,+0.38%,0.9197,0.9233,0.0036,+0.0036,0.8395,0.8434,0.0039,Positive temporal trajectory gain
-Compact MLP Neural Network,Deep Learning,0.8023,0.8065,0.0042,+0.42%,0.8021,0.8065,0.0044,+0.44%,0.8848,0.8927,0.0079,+0.0079,0.8023,0.8065,0.0042,Positive temporal trajectory gain
+Compact MLP Neural Network,Deep Learning,0.8043,0.8096,0.0053,+0.53%,0.8041,0.8096,0.0055,+0.55%,0.8867,0.8939,0.0072,+0.0072,0.8043,0.8096,0.0053,Positive temporal trajectory gain

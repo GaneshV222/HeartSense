@@ -1,52 +1,42 @@
 """
 HeartSense – Data Loader
 
-Loads the Cleveland Heart Disease Dataset from CSV.
-Downloads from UCI if the local file is missing.
+Loads the cardiovascular dataset from CSV / Excel.
 """
 
 import os
-import urllib.request
+from pathlib import Path
 import pandas as pd
-from app.config import DATASET_PATH, FEATURE_NAMES, TARGET_NAME
-
-
-UCI_URL = (
-    "https://archive.ics.uci.edu/ml/machine-learning-databases/"
-    "heart-disease/processed.cleveland.data"
-)
-
-
-def download_dataset(dest_path: str = DATASET_PATH) -> str:
-    """Download the processed Cleveland dataset from UCI if not present."""
-    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    if not os.path.exists(dest_path):
-        print(f"[DataLoader] Downloading Cleveland dataset to {dest_path} …")
-        urllib.request.urlretrieve(UCI_URL, dest_path)
-        # The UCI file has no header – add one
-        cols = FEATURE_NAMES + [TARGET_NAME]
-        df = pd.read_csv(dest_path, header=None, names=cols, na_values="?")
-        df.to_csv(dest_path, index=False)
-        print("[DataLoader] Download complete.")
-    return dest_path
+from app.config import DATASET_PATH
 
 
 def load_dataset(path: str | None = None) -> pd.DataFrame:
     """
-    Load the heart-disease CSV and return a DataFrame with the standard
-    column names.  If *path* is ``None`` the configured ``DATASET_PATH``
-    is used and the file is downloaded automatically when missing.
+    Load the cardiovascular dataset and return a clean DataFrame.
     """
     path = path or DATASET_PATH
     if not os.path.exists(path):
-        download_dataset(path)
+        candidates = [
+            path,
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "heart_disease_prediction_2026.csv"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "backend", "data", "heart_disease_prediction_2026.csv"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "heart_disease_prediction_2026.csv"),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                path = c
+                break
 
-    df = pd.read_csv(path, na_values="?")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset not found at path: {path}")
 
-    # If the file has no header row (raw UCI), assign column names
-    expected_cols = FEATURE_NAMES + [TARGET_NAME]
-    if list(df.columns) != expected_cols and df.shape[1] == len(expected_cols):
-        df.columns = expected_cols
+    ext = Path(path).suffix.lower()
+    if ext in {".xls", ".xlsx"}:
+        df = pd.read_excel(path)
+    else:
+        df = pd.read_csv(path)
 
+    # Normalize columns
+    df.columns = [str(c).strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
     print(f"[DataLoader] Loaded {len(df)} rows, {df.shape[1]} columns from {path}")
     return df

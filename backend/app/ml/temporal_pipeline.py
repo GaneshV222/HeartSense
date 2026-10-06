@@ -2,39 +2,43 @@
 HeartSense – True Longitudinal Temporal Pipeline + Database + ML/DL
 
 This module implements:
-  1. Dataset inspection and verification (detects 1-visit vs multi-visit honestly, no fabricated visits)
-  2. PostgreSQL ingestion of visits into patient_visits table
-  3. Authoritative temporal feature engineering for the 10 core clinical variables:
-     - 8 Numerical Deltas: delta_systolic_bp, delta_diastolic_bp, delta_cholesterol,
-       delta_ldl, delta_hdl, delta_bmi, delta_hba1c, delta_resting_heart_rate
-     - 2 Categorical Changes: smoking_status_changed, physical_activity_changed
-  4. SMOTE Balancing applied before train/test split per user specification
+  1. Dataset inspection and verification (heart_disease_prediction_2026.csv as Single Source of Truth)
+  2. PostgreSQL ingestion:
+     - patients: unique patient master records
+     - patient_visits: permanent history of all visits
+     - temporal_patient_data: ONLY the latest two visits per patient for temporal changes and rates
+  3. Zero-leakage temporal feature preparation:
+     - 24 baseline clinical & lifestyle features
+     - 10 previous values (8 numerical, 2 lifestyle)
+     - 10 temporal changes (8 numerical changes, 2 lifestyle changes)
+     - 8 temporal rates of change (change / days_between_visits)
+  4. SMOTE balancing applied before train/test split
   5. Dual Pipeline Model Suite & Comparative Analysis:
-     - Baseline Models (Before Temporal Data Usage: 24 standard clinical features)
-     - Longitudinal Models (After Temporal Data Usage: 24 baseline + 10 temporal features)
+     - Baseline Models (Before Temporal Data: 24 standard features)
+     - Longitudinal Models (After Temporal Data: 24 baseline + 10 previous + 10 changes + 8 rates)
      Approved Models:
        - XGBoost (XGBClassifier)
        - Gradient Boosting (GradientBoostingClassifier)
        - AdaBoost (AdaBoostClassifier)
        - LightGBM (LGBMClassifier)
-       - Deep Learning: Compact Regularized MLP Neural Network (MLPClassifier)
-       (KNN, Logistic Regression, Naive Bayes completely removed)
-  6. Multi-metric evaluation: Accuracy, Precision, Recall, Specificity, F1, ROC-AUC, PR-AUC, Confusion Matrix
-  7. Feature importance extraction
-  8. Safe PostgreSQL persistence into patient_temporal_features without overwriting historical records
-  9. Single authoritative TemporalFeatureService used across all flows
+       - Compact MLP Neural Network (MLPClassifier)
+  6. Multi-metric evaluation and feature importance extraction
+  7. Prediction and manual visit ingestion endpoints
 """
 
 from __future__ import annotations
 
 import os
 import sys
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 os.environ["LOKY_MAX_CPU_COUNT"] = str(os.cpu_count() or 4)
 
 import time
 import json
 import warnings
-from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -70,6 +74,83 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sqlalchemy import text
 
+# --- Scikit-Learn SimpleImputer Backward/Forward Compatibility Shim ---
+if not hasattr(SimpleImputer, "_fill_dtype"):
+    def _get_fill_dtype(self):
+        if "_fill_dtype" in self.__dict__ and self.__dict__["_fill_dtype"] is not None:
+            return self.__dict__["_fill_dtype"]
+        if hasattr(self, "_fit_dtype") and self._fit_dtype is not None:
+            return self._fit_dtype
+        if hasattr(self, "statistics_") and self.statistics_ is not None and hasattr(self.statistics_, "dtype"):
+            return self.statistics_.dtype
+        return np.dtype("O") if getattr(self, "strategy", "") in ("most_frequent", "constant") else np.dtype("float64")
+
+    def _set_fill_dtype(self, val):
+        self.__dict__["_fill_dtype"] = val
+
+    SimpleImputer._fill_dtype = property(_get_fill_dtype, _set_fill_dtype)
+
+if not hasattr(SimpleImputer, "_fit_dtype"):
+    def _get_fit_dtype(self):
+        if "_fit_dtype" in self.__dict__ and self.__dict__["_fit_dtype"] is not None:
+            return self.__dict__["_fit_dtype"]
+        if hasattr(self, "_fill_dtype") and self._fill_dtype is not None:
+            return self._fill_dtype
+        if hasattr(self, "statistics_") and self.statistics_ is not None and hasattr(self.statistics_, "dtype"):
+            return self.statistics_.dtype
+        return np.dtype("O") if getattr(self, "strategy", "") in ("most_frequent", "constant") else np.dtype("float64")
+
+    def _set_fit_dtype(self, val):
+        self.__dict__["_fit_dtype"] = val
+
+    SimpleImputer._fit_dtype = property(_get_fit_dtype, _set_fit_dtype)
+
+
+def sanitize_preprocessor(preprocessor: Any) -> Any:
+    """
+    Ensure all SimpleImputer and transformer steps have valid _fill_dtype and _fit_dtype
+    attributes regardless of how they were serialized or deserialized.
+    """
+    if preprocessor is None:
+        return preprocessor
+
+    def _fix_step(est):
+        if est is None:
+            return
+        if hasattr(est, "steps"):
+            for _, step in est.steps:
+                _fix_step(step)
+        if hasattr(est, "transformers_"):
+            for item in est.transformers_:
+                if len(item) >= 2 and item[1] not in ("drop", "passthrough", None):
+                    _fix_step(item[1])
+        if hasattr(est, "transformers"):
+            for item in est.transformers:
+                if len(item) >= 2 and item[1] not in ("drop", "passthrough", None):
+                    _fix_step(item[1])
+
+        cls_name = est.__class__.__name__
+        if "SimpleImputer" in cls_name or hasattr(est, "statistics_"):
+            stat = getattr(est, "statistics_", None)
+            stat_dtype = stat.dtype if (stat is not None and hasattr(stat, "dtype")) else None
+            strategy = getattr(est, "strategy", "mean")
+            default_dtype = np.dtype("O") if strategy in ("most_frequent", "constant") else np.dtype("float64")
+            target_dtype = stat_dtype if stat_dtype is not None else default_dtype
+
+            try:
+                if not hasattr(est, "_fill_dtype") or getattr(est, "_fill_dtype") is None:
+                    est.__dict__["_fill_dtype"] = target_dtype
+                if not hasattr(est, "_fit_dtype") or getattr(est, "_fit_dtype") is None:
+                    est.__dict__["_fit_dtype"] = target_dtype
+            except Exception:
+                pass
+
+    try:
+        _fix_step(preprocessor)
+    except Exception:
+        pass
+    return preprocessor
+
 # Import XGBoost and LightGBM
 try:
     from xgboost import XGBClassifier
@@ -88,29 +169,32 @@ from app.config import (
     MODEL_ARTIFACT_DIR,
     RANDOM_STATE,
     TEST_SIZE,
+    BASELINE_FEATURE_COLS,
+    CRITICAL_NUMERICAL_FEATURES,
+    CRITICAL_LIFESTYLE_FEATURES,
+    ALL_10_TEMPORAL_VARIABLES,
+    PREVIOUS_VALUE_COLS,
+    CHANGE_COLS,
+    RATE_COLS,
+    ALL_MODEL_FEATURE_COLS,
 )
-from app.database import engine, init_db, get_session
-from app.models import Patient, PatientVisit, PatientTemporalFeature
+from app.database import engine, init_db, reset_db_tables, get_session
+from app.models import Patient, PatientVisit, TemporalPatientData, Prediction
 from app.services.temporal_service import (
     TemporalFeatureService,
     NUMERICAL_VARIABLES,
     CATEGORICAL_VARIABLES,
-    ALL_10_TEMPORAL_VARIABLES,
-    NUMERICAL_DELTA_FIELDS,
-    CATEGORICAL_CHANGED_FIELDS,
     VARIABLE_METADATA,
+    normalize_smoking_value,
+    _safe_float,
+    _safe_str,
 )
-
-# Standard baseline clinical feature names present in the dataset
-BASELINE_FEATURE_COLS = [
-    "age", "gender", "bmi", "chest_pain_type", "systolic_bp", "diastolic_bp",
-    "resting_heart_rate", "max_heart_rate", "cholesterol", "hdl", "ldl",
-    "fasting_blood_sugar", "hba1c", "diabetes", "resting_ecg", "exercise_angina",
-    "oldpeak", "st_slope", "num_major_vessels", "thalassemia", "smoking",
-    "family_history", "physical_activity", "stress_level"
-]
-
-ALL_MODEL_FEATURE_COLS = BASELINE_FEATURE_COLS + NUMERICAL_DELTA_FIELDS + CATEGORICAL_CHANGED_FIELDS
+from app.services.patient_service import (
+    create_patient,
+    create_visit,
+    create_prediction,
+    get_patient_by_id,
+)
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -125,8 +209,8 @@ def load_dataset(path: str | None = None) -> pd.DataFrame:
         candidates = [
             path,
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "heart_disease_prediction_2026.csv"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "backend", "data", "heart_disease_prediction_2026.csv"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "heart_disease_prediction_2026.csv"),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "heart_disease_prediction_2026.csv"),
         ]
         for c in candidates:
             if os.path.exists(c):
@@ -145,7 +229,7 @@ def load_dataset(path: str | None = None) -> pd.DataFrame:
 
 def inspect_and_clean_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
-    Examine dataset integrity: check unique patients vs records honestly.
+    Inspect dataset integrity and clean values according to the new dataset schema.
     """
     original_records = len(df)
     original_columns = len(df.columns)
@@ -167,24 +251,24 @@ def inspect_and_clean_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str,
         base_time = datetime(2025, 1, 1)
         df["visit_date"] = [base_time + timedelta(days=i % 365, hours=(i // 365) % 24) for i in range(len(df))]
 
+    # Visit number
+    if "visit_number" in df.columns:
+        df["visit_number"] = pd.to_numeric(df["visit_number"], errors="coerce").fillna(1).astype(int)
+    else:
+        df["visit_number"] = 1
+
     # Target column
     target_col = "prediction" if "prediction" in df.columns else ("target" if "target" in df.columns else None)
     if target_col and target_col in df.columns:
-        df["target"] = (pd.to_numeric(df[target_col], errors="coerce").fillna(0) > 0).astype(int)
+        df["prediction"] = (pd.to_numeric(df[target_col], errors="coerce").fillna(0) > 0).astype(int)
     else:
-        df["target"] = 0
+        df["prediction"] = 0
 
     vc = df["patient_id"].value_counts()
     unique_patients = int(vc.size)
     multi_visit_patients = int((vc > 1).sum())
     single_visit_patients = int((vc == 1).sum())
     avg_visits = round(float(len(df)) / float(max(unique_patients, 1)), 2)
-
-    temporal_status = (
-        "Genuine longitudinal follow-up records present."
-        if multi_visit_patients > 0
-        else "Temporal comparison unavailable because patients have only one recorded visit."
-    )
 
     report = {
         "Original records": original_records,
@@ -196,205 +280,292 @@ def inspect_and_clean_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str,
         "Patients with multiple visits": multi_visit_patients,
         "Patients with one visit": single_visit_patients,
         "Average visits per patient": avg_visits,
-        "Temporal status": temporal_status,
         "Earliest visit": str(df["visit_date"].min()),
         "Latest visit": str(df["visit_date"].max()),
     }
 
-    print("\nDATASET INTEGRITY & LONGITUDINAL INSPECTION REPORT")
-    print("--------------------------------------------------")
+    print("\nDATASET INTEGRITY & PATIENT INSPECTION REPORT")
+    print("---------------------------------------------")
     for k, v in report.items():
         print(f"  {k}: {v}")
 
     return df, report
 
 
-def ingest_visits_into_db(df: pd.DataFrame) -> Dict[str, Any]:
+def ingest_dataset_to_postgresql(df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Ingest dataset visits into PostgreSQL patient_visits and patients table safely.
+    Ingests the dataset into PostgreSQL with the exact three-table architecture:
+      1. patients (unique patient records)
+      2. patient_visits (permanent history of all visits)
+      3. temporal_patient_data (ONLY the latest two visits per patient)
     """
-    init_db()
+    print("[Database] Resetting tables for fresh dataset ingestion...")
+    reset_db_tables()
+
+    # Sort dataset chronologically per patient
+    df = df.sort_values(by=["patient_id", "visit_date", "visit_number"]).reset_index(drop=True)
+    now = datetime.utcnow()
+
+    # 1. Populate patients table
+    print(f"[Database] Extracting unique patients from {len(df)} visits...")
+    patient_grp = df.drop_duplicates(subset=["patient_id"], keep="first")
+    patients_data = []
+    for _, row in patient_grp.iterrows():
+        pid = str(row["patient_id"])
+        gender = str(row.get("gender", "")) if pd.notna(row.get("gender")) else None
+        age = float(row.get("age")) if pd.notna(row.get("age")) else None
+        patients_data.append({
+            "patient_id": pid,
+            "name": f"Patient {pid}",
+            "gender": gender,
+            "age": age,
+            "created_at": now,
+        })
+
     with engine.begin() as con:
-        # Check existing count
-        existing_count = con.execute(text("SELECT COUNT(*) FROM patient_visits")).scalar() or 0
-        now = datetime.utcnow()
-
-        patient_codes = df["patient_id"].astype(str).unique().tolist()
-        p_batch = [{"c": p, "t": now} for p in patient_codes]
-
-        # Insert patients idempotently
-        con.execute(
-            text("INSERT INTO patients (patient_code, created_at) VALUES (:c, :t) ON CONFLICT (patient_code) DO NOTHING"),
-            p_batch
-        )
-
-        if existing_count == 0:
-            print(f"[Database] Ingesting {len(df)} patient visits into PostgreSQL...")
-            id_rows = con.execute(text("SELECT id, patient_code FROM patients")).mappings().all()
-            id_map = {str(r["patient_code"]): r["id"] for r in id_rows}
-
-            ins_df = pd.DataFrame()
-            pids = df["patient_id"].astype(str)
-            ins_df["patient_id"] = [id_map.get(pid, 1) for pid in pids]
-            ins_df["source_patient_id"] = pids
-            ins_df["visit_timestamp"] = df["visit_date"]
-            ins_df["visit_date"] = df["visit_date"]
-
-            for c in BASELINE_FEATURE_COLS:
-                ins_df[c] = df[c] if c in df.columns else None
-
-            ins_df["smoking_status"] = df["smoking"] if "smoking" in df.columns else None
-            ins_df["target"] = df["target"]
-            ins_df["created_at"] = now
-            ins_df["updated_at"] = now
-
-            records = ins_df.to_dict(orient="records")
-            batch_size = 10000
-            for i in range(0, len(records), batch_size):
-                batch = records[i:i + batch_size]
-                con.execute(text("""
-                    INSERT INTO patient_visits (
-                        patient_id, source_patient_id, visit_timestamp, visit_date,
-                        age, gender, bmi, chest_pain_type, systolic_bp, diastolic_bp,
-                        resting_heart_rate, max_heart_rate, cholesterol, hdl, ldl,
-                        fasting_blood_sugar, hba1c, diabetes, resting_ecg, exercise_angina,
-                        oldpeak, st_slope, num_major_vessels, thalassemia, smoking,
-                        smoking_status, family_history, physical_activity, stress_level,
-                        target, created_at, updated_at
-                    )
-                    VALUES (
-                        :patient_id, :source_patient_id, :visit_timestamp, :visit_date,
-                        :age, :gender, :bmi, :chest_pain_type, :systolic_bp, :diastolic_bp,
-                        :resting_heart_rate, :max_heart_rate, :cholesterol, :hdl, :ldl,
-                        :fasting_blood_sugar, :hba1c, :diabetes, :resting_ecg, :exercise_angina,
-                        :oldpeak, :st_slope, :num_major_vessels, :thalassemia, :smoking,
-                        :smoking_status, :family_history, :physical_activity, :stress_level,
-                        :target, :created_at, :updated_at
-                    )
-                """), batch)
-            new_inserted = len(records)
-        else:
-            new_inserted = 0
-
-    return {
-        "existing_records": int(existing_count),
-        "new_records_inserted": int(new_inserted),
-        "total_records": int(existing_count + new_inserted),
-    }
-
-
-def compute_and_persist_temporal_snapshots_for_all_visits():
-    """
-    Compute and populate patient_temporal_features for all visits in PostgreSQL
-    using the exact TemporalFeatureService (ORDER BY patient_id, visit_date ASC).
-    """
-    with engine.begin() as con:
-        existing_tf = con.execute(text("SELECT COUNT(*) FROM patient_temporal_features")).scalar() or 0
-        total_visits = con.execute(text("SELECT COUNT(*) FROM patient_visits")).scalar() or 0
-
-        if existing_tf >= total_visits and total_visits > 0:
-            print(f"[Temporal] patient_temporal_features table already has {existing_tf} snapshots.")
-            return existing_tf
-
-        print("[Temporal] Generating longitudinal temporal snapshots in PostgreSQL...")
-        visits_df = pd.read_sql(
-            "SELECT * FROM patient_visits ORDER BY source_patient_id, visit_date ASC, id ASC",
-            con
-        )
-
-        if visits_df.empty:
-            return 0
-
-        pcol = "source_patient_id"
-        now = datetime.utcnow()
-
-        for var in NUMERICAL_VARIABLES:
-            cur = pd.to_numeric(visits_df[var], errors="coerce") if var in visits_df.columns else pd.Series(np.nan, index=visits_df.index)
-            prev = visits_df.groupby(pcol)[var].shift(1) if var in visits_df.columns else pd.Series(np.nan, index=visits_df.index)
-            prev = pd.to_numeric(prev, errors="coerce")
-            visits_df[f"current_{var}"] = cur
-            visits_df[f"previous_{var}"] = prev
-            visits_df[f"delta_{var}"] = cur - prev
-
-        smk_col = "smoking_status" if "smoking_status" in visits_df.columns else "smoking"
-        cur_smk = visits_df[smk_col].astype(str) if smk_col in visits_df.columns else pd.Series("", index=visits_df.index)
-        prev_smk = visits_df.groupby(pcol)[smk_col].shift(1) if smk_col in visits_df.columns else pd.Series(np.nan, index=visits_df.index)
-        visits_df["current_smoking_status"] = cur_smk.where(cur_smk.ne("nan") & cur_smk.ne("None"), None)
-        visits_df["previous_smoking_status"] = prev_smk.where(prev_smk.notna(), None)
-        visits_df["smoking_status_changed"] = np.where(prev_smk.notna(), cur_smk != prev_smk, None)
-
-        act_col = "physical_activity"
-        cur_act = visits_df[act_col].astype(str) if act_col in visits_df.columns else pd.Series("", index=visits_df.index)
-        prev_act = visits_df.groupby(pcol)[act_col].shift(1) if act_col in visits_df.columns else pd.Series(np.nan, index=visits_df.index)
-        visits_df["current_physical_activity"] = cur_act.where(cur_act.ne("nan") & cur_act.ne("None"), None)
-        visits_df["previous_physical_activity"] = prev_act.where(prev_act.notna(), None)
-        visits_df["physical_activity_changed"] = np.where(prev_act.notna(), cur_act != prev_act, None)
-
-        ptf_df = pd.DataFrame()
-        ptf_df["patient_id"] = visits_df["source_patient_id"].astype(str)
-        ptf_df["visit_id"] = visits_df["id"]
-        ptf_df["assessment_date"] = visits_df["visit_date"]
-
-        for var in NUMERICAL_VARIABLES:
-            ptf_df[f"previous_{var}"] = visits_df[f"previous_{var}"].where(pd.notna(visits_df[f"previous_{var}"]), None)
-            ptf_df[f"current_{var}"] = visits_df[f"current_{var}"].where(pd.notna(visits_df[f"current_{var}"]), None)
-            ptf_df[f"delta_{var}"] = visits_df[f"delta_{var}"].where(pd.notna(visits_df[f"delta_{var}"]), None)
-
-        ptf_df["previous_smoking_status"] = visits_df["previous_smoking_status"]
-        ptf_df["current_smoking_status"] = visits_df["current_smoking_status"]
-        ptf_df["smoking_status_changed"] = visits_df["smoking_status_changed"]
-
-        ptf_df["previous_physical_activity"] = visits_df["previous_physical_activity"]
-        ptf_df["current_physical_activity"] = visits_df["current_physical_activity"]
-        ptf_df["physical_activity_changed"] = visits_df["physical_activity_changed"]
-
-        ptf_df["created_at"] = now
-        ptf_df["updated_at"] = now
-
-        con.execute(text("DELETE FROM patient_temporal_features"))
-        records = ptf_df.to_dict(orient="records")
-
-        for r in records:
-            for k, v in r.items():
-                if pd.isna(v):
-                    r[k] = None
-
+        print(f"[Database] Inserting {len(patients_data)} unique patients into 'patients'...")
         batch_size = 10000
+        for i in range(0, len(patients_data), batch_size):
+            batch = patients_data[i:i + batch_size]
+            con.execute(text("""
+                INSERT INTO patients (patient_id, name, gender, age, created_at)
+                VALUES (:patient_id, :name, :gender, :age, :created_at)
+                ON CONFLICT (patient_id) DO NOTHING
+            """), batch)
+
+    # 2. Populate patient_visits table
+    print(f"[Database] Inserting {len(df)} visits into 'patient_visits'...")
+    visit_cols = BASELINE_FEATURE_COLS + ["patient_id", "visit_number", "visit_date", "prediction"]
+    vis_df = df[[c for c in visit_cols if c in df.columns]].copy()
+    vis_df["visit_timestamp"] = vis_df["visit_date"]
+    vis_df["created_at"] = now
+    vis_df["updated_at"] = now
+
+    # Ensure smoking_status exists
+    if "smoking" in vis_df.columns and "smoking_status" not in vis_df.columns:
+        vis_df["smoking_status"] = vis_df["smoking"]
+
+    records = vis_df.to_dict(orient="records")
+    for r in records:
+        for k, v in r.items():
+            if pd.isna(v):
+                r[k] = None
+
+    with engine.begin() as con:
         for i in range(0, len(records), batch_size):
             batch = records[i:i + batch_size]
             con.execute(text("""
-                INSERT INTO patient_temporal_features (
-                    patient_id, visit_id, assessment_date,
-                    previous_systolic_bp, current_systolic_bp, delta_systolic_bp,
-                    previous_diastolic_bp, current_diastolic_bp, delta_diastolic_bp,
-                    previous_cholesterol, current_cholesterol, delta_cholesterol,
-                    previous_ldl, current_ldl, delta_ldl,
-                    previous_hdl, current_hdl, delta_hdl,
-                    previous_bmi, current_bmi, delta_bmi,
-                    previous_hba1c, current_hba1c, delta_hba1c,
-                    previous_resting_heart_rate, current_resting_heart_rate, delta_resting_heart_rate,
-                    previous_smoking_status, current_smoking_status, smoking_status_changed,
-                    previous_physical_activity, current_physical_activity, physical_activity_changed,
-                    created_at, updated_at
+                INSERT INTO patient_visits (
+                    patient_id, visit_number, visit_date, visit_timestamp,
+                    age, gender, bmi, chest_pain_type, systolic_bp, diastolic_bp,
+                    resting_heart_rate, max_heart_rate, cholesterol, hdl, ldl,
+                    fasting_blood_sugar, hba1c, diabetes, resting_ecg, exercise_angina,
+                    oldpeak, st_slope, num_major_vessels, thalassemia, smoking,
+                    smoking_status, family_history, physical_activity, stress_level,
+                    prediction, created_at, updated_at
                 )
                 VALUES (
-                    :patient_id, :visit_id, :assessment_date,
-                    :previous_systolic_bp, :current_systolic_bp, :delta_systolic_bp,
-                    :previous_diastolic_bp, :current_diastolic_bp, :delta_diastolic_bp,
-                    :previous_cholesterol, :current_cholesterol, :delta_cholesterol,
-                    :previous_ldl, :current_ldl, :delta_ldl,
-                    :previous_hdl, :current_hdl, :delta_hdl,
-                    :previous_bmi, :current_bmi, :delta_bmi,
-                    :previous_hba1c, :current_hba1c, :delta_hba1c,
-                    :previous_resting_heart_rate, :current_resting_heart_rate, :delta_resting_heart_rate,
-                    :previous_smoking_status, :current_smoking_status, :smoking_status_changed,
-                    :previous_physical_activity, :current_physical_activity, :physical_activity_changed,
-                    :created_at, :updated_at
+                    :patient_id, :visit_number, :visit_date, :visit_timestamp,
+                    :age, :gender, :bmi, :chest_pain_type, :systolic_bp, :diastolic_bp,
+                    :resting_heart_rate, :max_heart_rate, :cholesterol, :hdl, :ldl,
+                    :fasting_blood_sugar, :hba1c, :diabetes, :resting_ecg, :exercise_angina,
+                    :oldpeak, :st_slope, :num_major_vessels, :thalassemia, :smoking,
+                    :smoking_status, :family_history, :physical_activity, :stress_level,
+                    :prediction, :created_at, :updated_at
                 )
             """), batch)
 
-        print(f"[Temporal] Generated {len(records)} temporal snapshots in patient_temporal_features table.")
-        return len(records)
+    # 3. Populate temporal_patient_data (ONLY the latest two visits per patient)
+    print("[Database] Populating 'temporal_patient_data' with ONLY the latest two visits per patient...")
+    with engine.begin() as con:
+        db_visits_df = pd.read_sql(
+            "SELECT * FROM patient_visits ORDER BY patient_id, visit_date ASC, id ASC",
+            con
+        )
+
+    db_records = db_visits_df.to_dict(orient="records")
+    patient_visits_map: Dict[str, List[Dict[str, Any]]] = {}
+    for r in db_records:
+        pid = str(r["patient_id"])
+        if pid not in patient_visits_map:
+            patient_visits_map[pid] = []
+        patient_visits_map[pid].append(r)
+
+    # Calculate snapshots for latest 2 visits per patient
+    temporal_rows = []
+    for pid, v_list in patient_visits_map.items():
+        latest_v = v_list[-1]
+        prev_v = v_list[-2] if len(v_list) > 1 else None
+
+        snapshot = TemporalFeatureService.calculate_snapshot(
+            current_data=latest_v,
+            previous_data=prev_v,
+            patient_id=str(pid),
+            current_visit_id=latest_v["id"],
+            previous_visit_id=prev_v["id"] if prev_v else None,
+            current_visit_date=latest_v["visit_date"],
+            previous_visit_date=prev_v["visit_date"] if prev_v else None,
+        )
+
+        row = {
+            "patient_id": str(pid),
+            "current_visit_id": snapshot["current_visit_id"],
+            "previous_visit_id": snapshot["previous_visit_id"],
+            "current_visit_date": snapshot["current_visit_date"],
+            "previous_visit_date": snapshot["previous_visit_date"],
+            "days_between_visits": snapshot["days_between_visits"],
+            "created_at": now,
+            "updated_at": now,
+        }
+        for var in NUMERICAL_VARIABLES:
+            row[f"current_{var}"] = snapshot.get(f"current_{var}")
+            row[f"previous_{var}"] = snapshot.get(f"previous_{var}")
+            row[f"{var}_change"] = snapshot.get(f"{var}_change")
+            row[f"{var}_rate"] = snapshot.get(f"{var}_rate")
+
+        row["current_smoking"] = snapshot.get("current_smoking")
+        row["previous_smoking"] = snapshot.get("previous_smoking")
+        row["smoking_changed"] = snapshot.get("smoking_changed")
+
+        row["current_physical_activity"] = snapshot.get("current_physical_activity")
+        row["previous_physical_activity"] = snapshot.get("previous_physical_activity")
+        row["physical_activity_changed"] = snapshot.get("physical_activity_changed")
+
+        temporal_rows.append(row)
+
+    with engine.begin() as con:
+        for i in range(0, len(temporal_rows), batch_size):
+            batch = temporal_rows[i:i + batch_size]
+            con.execute(text("""
+                INSERT INTO temporal_patient_data (
+                    patient_id, current_visit_id, previous_visit_id,
+                    current_visit_date, previous_visit_date, days_between_visits,
+                    current_systolic_bp, previous_systolic_bp, systolic_bp_change, systolic_bp_rate,
+                    current_diastolic_bp, previous_diastolic_bp, diastolic_bp_change, diastolic_bp_rate,
+                    current_cholesterol, previous_cholesterol, cholesterol_change, cholesterol_rate,
+                    current_ldl, previous_ldl, ldl_change, ldl_rate,
+                    current_hdl, previous_hdl, hdl_change, hdl_rate,
+                    current_bmi, previous_bmi, bmi_change, bmi_rate,
+                    current_hba1c, previous_hba1c, hba1c_change, hba1c_rate,
+                    current_resting_heart_rate, previous_resting_heart_rate, resting_heart_rate_change, resting_heart_rate_rate,
+                    current_smoking, previous_smoking, smoking_changed,
+                    current_physical_activity, previous_physical_activity, physical_activity_changed,
+                    created_at, updated_at
+                )
+                VALUES (
+                    :patient_id, :current_visit_id, :previous_visit_id,
+                    :current_visit_date, :previous_visit_date, :days_between_visits,
+                    :current_systolic_bp, :previous_systolic_bp, :systolic_bp_change, :systolic_bp_rate,
+                    :current_diastolic_bp, :previous_diastolic_bp, :diastolic_bp_change, :diastolic_bp_rate,
+                    :current_cholesterol, :previous_cholesterol, :cholesterol_change, :cholesterol_rate,
+                    :current_ldl, :previous_ldl, :ldl_change, :ldl_rate,
+                    :current_hdl, :previous_hdl, :hdl_change, :hdl_rate,
+                    :current_bmi, :previous_bmi, :bmi_change, :bmi_rate,
+                    :current_hba1c, :previous_hba1c, :hba1c_change, :hba1c_rate,
+                    :current_resting_heart_rate, :previous_resting_heart_rate, :resting_heart_rate_change, :resting_heart_rate_rate,
+                    :current_smoking, :previous_smoking, :smoking_changed,
+                    :current_physical_activity, :previous_physical_activity, :physical_activity_changed,
+                    :created_at, :updated_at
+                )
+                ON CONFLICT (patient_id) DO UPDATE SET
+                    current_visit_id = EXCLUDED.current_visit_id,
+                    previous_visit_id = EXCLUDED.previous_visit_id,
+                    current_visit_date = EXCLUDED.current_visit_date,
+                    previous_visit_date = EXCLUDED.previous_visit_date,
+                    days_between_visits = EXCLUDED.days_between_visits,
+                    current_systolic_bp = EXCLUDED.current_systolic_bp,
+                    previous_systolic_bp = EXCLUDED.previous_systolic_bp,
+                    systolic_bp_change = EXCLUDED.systolic_bp_change,
+                    systolic_bp_rate = EXCLUDED.systolic_bp_rate,
+                    current_diastolic_bp = EXCLUDED.current_diastolic_bp,
+                    previous_diastolic_bp = EXCLUDED.previous_diastolic_bp,
+                    diastolic_bp_change = EXCLUDED.diastolic_bp_change,
+                    diastolic_bp_rate = EXCLUDED.diastolic_bp_rate,
+                    current_cholesterol = EXCLUDED.current_cholesterol,
+                    previous_cholesterol = EXCLUDED.previous_cholesterol,
+                    cholesterol_change = EXCLUDED.cholesterol_change,
+                    cholesterol_rate = EXCLUDED.cholesterol_rate,
+                    current_ldl = EXCLUDED.current_ldl,
+                    previous_ldl = EXCLUDED.previous_ldl,
+                    ldl_change = EXCLUDED.ldl_change,
+                    ldl_rate = EXCLUDED.ldl_rate,
+                    current_hdl = EXCLUDED.current_hdl,
+                    previous_hdl = EXCLUDED.previous_hdl,
+                    hdl_change = EXCLUDED.hdl_change,
+                    hdl_rate = EXCLUDED.hdl_rate,
+                    current_bmi = EXCLUDED.current_bmi,
+                    previous_bmi = EXCLUDED.previous_bmi,
+                    bmi_change = EXCLUDED.bmi_change,
+                    bmi_rate = EXCLUDED.bmi_rate,
+                    current_hba1c = EXCLUDED.current_hba1c,
+                    previous_hba1c = EXCLUDED.previous_hba1c,
+                    hba1c_change = EXCLUDED.hba1c_change,
+                    hba1c_rate = EXCLUDED.hba1c_rate,
+                    current_resting_heart_rate = EXCLUDED.current_resting_heart_rate,
+                    previous_resting_heart_rate = EXCLUDED.previous_resting_heart_rate,
+                    resting_heart_rate_change = EXCLUDED.resting_heart_rate_change,
+                    resting_heart_rate_rate = EXCLUDED.resting_heart_rate_rate,
+                    current_smoking = EXCLUDED.current_smoking,
+                    previous_smoking = EXCLUDED.previous_smoking,
+                    smoking_changed = EXCLUDED.smoking_changed,
+                    current_physical_activity = EXCLUDED.current_physical_activity,
+                    previous_physical_activity = EXCLUDED.previous_physical_activity,
+                    physical_activity_changed = EXCLUDED.physical_activity_changed,
+                    updated_at = EXCLUDED.updated_at
+            """), batch)
+
+    print(f"[Database] Successfully populated PostgreSQL database:")
+    print(f"  • patients: {len(patients_data)} rows")
+    print(f"  • patient_visits: {len(records)} rows")
+    print(f"  • temporal_patient_data: {len(temporal_rows)} rows")
+
+    return {
+        "patients_count": len(patients_data),
+        "visits_count": len(records),
+        "temporal_records_count": len(temporal_rows),
+    }
+
+
+def prepare_ml_features_from_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Compute previous visit values, temporal changes, and rates for EVERY visit in the dataset
+    using strictly chronologically preceding visits of the SAME patient (zero data leakage).
+    """
+    df_sorted = df.sort_values(by=["patient_id", "visit_date", "visit_number"]).reset_index(drop=True)
+
+    # Date differences
+    df_sorted["prev_visit_date"] = df_sorted.groupby("patient_id")["visit_date"].shift(1)
+    diff_days = (df_sorted["visit_date"] - df_sorted["prev_visit_date"]).dt.total_seconds() / 86400.0
+    df_sorted["days_between_visits"] = np.where(diff_days > 0, diff_days, np.nan)
+
+    # 8 Numerical features
+    for var in CRITICAL_NUMERICAL_FEATURES:
+        cur_s = pd.to_numeric(df_sorted[var], errors="coerce")
+        prev_s = df_sorted.groupby("patient_id")[var].shift(1)
+        prev_s = pd.to_numeric(prev_s, errors="coerce")
+
+        df_sorted[f"prev_{var}"] = prev_s
+        df_sorted[f"{var}_change"] = cur_s - prev_s
+        df_sorted[f"delta_{var}"] = cur_s - prev_s
+        df_sorted[f"{var}_rate"] = np.where(
+            df_sorted["days_between_visits"] > 0,
+            (cur_s - prev_s) / df_sorted["days_between_visits"],
+            np.nan
+        )
+
+    # 2 Lifestyle features
+    for var in CRITICAL_LIFESTYLE_FEATURES:
+        cur_s = df_sorted[var].astype(str)
+        prev_s = df_sorted.groupby("patient_id")[var].shift(1)
+        df_sorted[f"prev_{var}"] = prev_s
+        df_sorted[f"{var}_changed"] = np.where(
+            prev_s.notna(),
+            cur_s != prev_s.astype(str),
+            np.nan
+        )
+
+    y = df_sorted["prediction"].astype(int)
+    return df_sorted, y
 
 
 def build_feature_preprocessor(feature_cols: List[str], df_sample: pd.DataFrame) -> Tuple[ColumnTransformer, List[str], List[str]]:
@@ -407,12 +578,12 @@ def build_feature_preprocessor(feature_cols: List[str], df_sample: pd.DataFrame)
     for col in feature_cols:
         if col in df_sample.columns:
             s = pd.to_numeric(df_sample[col], errors="coerce")
-            if s.notna().mean() > 0.6:
+            if s.notna().mean() > 0.4:
                 num_cols.append(col)
             else:
                 cat_cols.append(col)
         else:
-            if col in NUMERICAL_DELTA_FIELDS:
+            if any(term in col for term in ["_change", "_rate", "prev_", "delta_"]):
                 num_cols.append(col)
             else:
                 cat_cols.append(col)
@@ -461,18 +632,20 @@ def train_model_suite(
             learning_rate=0.1,
             random_state=RANDOM_STATE,
             eval_metric="logloss",
-            n_jobs=1,
+            tree_method="hist",
+            n_jobs=-1,
         )
 
     models["Gradient Boosting"] = GradientBoostingClassifier(
-        n_estimators=60,
+        n_estimators=50,
         max_depth=5,
+        subsample=0.8,
         learning_rate=0.1,
         random_state=RANDOM_STATE,
     )
 
     models["AdaBoost"] = AdaBoostClassifier(
-        n_estimators=60,
+        n_estimators=50,
         learning_rate=0.1,
         random_state=RANDOM_STATE,
     )
@@ -484,7 +657,7 @@ def train_model_suite(
             learning_rate=0.1,
             random_state=RANDOM_STATE,
             verbose=-1,
-            n_jobs=1,
+            n_jobs=-1,
         )
 
     # Compact Regularized Deep Learning MLP Neural Network
@@ -495,8 +668,8 @@ def train_model_suite(
         learning_rate_init=0.001,
         early_stopping=True,
         validation_fraction=0.1,
-        n_iter_no_change=10,
-        max_iter=200,
+        n_iter_no_change=5,
+        max_iter=100,
         random_state=RANDOM_STATE,
     )
 
@@ -504,7 +677,7 @@ def train_model_suite(
     trained_models = {}
     feature_importances: Dict[str, float] = {}
 
-    print(f"\n[Training] Running {suite_label} Model Suite (5 models)...")
+    print(f"\n[Training] Running {suite_label} Model Suite ({len(models)} approved models)...")
     for name, model in models.items():
         t_start = time.time()
         model.fit(X_train_res, y_train_res)
@@ -569,9 +742,11 @@ def train_model_suite(
 def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str, Any]:
     """
     Run complete HeartSense ML/DL pipeline:
-      - SMOTE applied before train-test split
-      - Evaluates models Before Temporal (Baseline 24 features) and After Temporal (34 features)
-      - Generates comparative analytics & persist all artifacts.
+      - Clean & ingest new dataset into PostgreSQL
+      - Prepare temporal features (zero leakage)
+      - Apply SMOTE before train/test split
+      - Evaluates models Before Temporal (Baseline 24 features) and After Temporal (Baseline + Previous + Changes + Rates)
+      - Generates comparative analytics & persists all artifacts.
     """
     dataset_path = dataset_path or DATASET_PATH
 
@@ -583,22 +758,11 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     df_raw = load_dataset(dataset_path)
     df_clean, prep_report = inspect_and_clean_dataset(df_raw)
 
-    # 2. Ingest Visits into PostgreSQL
-    db_stats = ingest_visits_into_db(df_clean)
+    # 2. Ingest Dataset into PostgreSQL (patients, patient_visits, temporal_patient_data)
+    db_stats = ingest_dataset_to_postgresql(df_clean)
 
-    # 3. Generate & Persist Temporal Snapshots in PostgreSQL
-    snapshots_count = compute_and_persist_temporal_snapshots_for_all_visits()
-
-    # Populate synthetic delta / change columns for the dataset representation
-    for col in NUMERICAL_DELTA_FIELDS:
-        if col not in df_clean.columns:
-            df_clean[col] = 0.0
-
-    for col in CATEGORICAL_CHANGED_FIELDS:
-        if col not in df_clean.columns:
-            df_clean[col] = "False"
-
-    y_all = df_clean["target"].astype(int)
+    # 3. Generate ML Features for all visits (zero leakage)
+    df_features, y_all = prepare_ml_features_from_dataset(df_clean)
 
     # -------------------------------------------------------------
     # PIPELINE 1: BEFORE TEMPORAL DATA USAGE (BASELINE 24 FEATURES)
@@ -606,7 +770,7 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     print("\n" + "=" * 50)
     print("1. BEFORE TEMPORAL DATA USAGE (BASELINE CLINICAL MODEL)")
     print("=" * 50)
-    X_baseline_df = df_clean[BASELINE_FEATURE_COLS].copy()
+    X_baseline_df = df_features[BASELINE_FEATURE_COLS].copy()
     base_preprocessor, base_num_cols, base_cat_cols = build_feature_preprocessor(BASELINE_FEATURE_COLS, X_baseline_df)
     X_base_proc = base_preprocessor.fit_transform(X_baseline_df)
     base_proc_names = list(base_preprocessor.get_feature_names_out())
@@ -624,13 +788,14 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     )
 
     # -------------------------------------------------------------
-    # PIPELINE 2: AFTER TEMPORAL DATA USAGE (24 BASELINE + 10 TEMPORAL)
+    # PIPELINE 2: AFTER TEMPORAL DATA USAGE (BASELINE + PREVIOUS + CHANGES + RATES)
     # -------------------------------------------------------------
     print("\n" + "=" * 50)
     print("2. AFTER TEMPORAL DATA USAGE (LONGITUDINAL ENHANCED MODEL)")
     print("=" * 50)
-    X_temporal_df = df_clean[ALL_MODEL_FEATURE_COLS].copy()
-    temp_preprocessor, temp_num_cols, temp_cat_cols = build_feature_preprocessor(ALL_MODEL_FEATURE_COLS, X_temporal_df)
+    model_features = [c for c in ALL_MODEL_FEATURE_COLS if c in df_features.columns]
+    X_temporal_df = df_features[model_features].copy()
+    temp_preprocessor, temp_num_cols, temp_cat_cols = build_feature_preprocessor(model_features, X_temporal_df)
     X_temp_proc = temp_preprocessor.fit_transform(X_temporal_df)
     temp_proc_names = list(temp_preprocessor.get_feature_names_out())
 
@@ -712,17 +877,17 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
         "model": temp_best_model,
         "model_name": temp_best_row["model_name"],
         "preprocessor": temp_preprocessor,
-        "feature_columns": ALL_MODEL_FEATURE_COLS,
+        "feature_columns": model_features,
         "num_cols": temp_num_cols,
         "cat_cols": temp_cat_cols,
         "temporal_variables": ALL_10_TEMPORAL_VARIABLES,
-        "numerical_deltas": NUMERICAL_DELTA_FIELDS,
-        "categorical_changes": CATEGORICAL_CHANGED_FIELDS,
+        "baseline_features": BASELINE_FEATURE_COLS,
+        "critical_numerical": CRITICAL_NUMERICAL_FEATURES,
+        "critical_lifestyle": CRITICAL_LIFESTYLE_FEATURES,
     }
     joblib.dump(artifact, os.path.join(MODEL_ARTIFACT_DIR, "temporal_model_artifact.joblib"))
     joblib.dump(temp_best_model, os.path.join(MODEL_ARTIFACT_DIR, "best_model.joblib"))
 
-    # Save comparison CSVs
     pd.DataFrame(temp_comparison).to_csv(os.path.join(MODEL_ARTIFACT_DIR, "model_comparison.csv"), index=False)
     pd.DataFrame(comparative_analysis).to_csv(os.path.join(MODEL_ARTIFACT_DIR, "before_after_temporal_comparison.csv"), index=False)
 
@@ -735,9 +900,9 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
             "patients_with_multiple_visits": prep_report["Patients with multiple visits"],
             "patients_with_one_visit": prep_report["Patients with one visit"],
             "average_visits_per_patient": prep_report["Average visits per patient"],
-            "maximum_visits_per_patient": 1,
-            "temporal_snapshots": snapshots_count,
-            "numeric_delta_availability": 0,
+            "maximum_visits_per_patient": int(df_clean.groupby("patient_id")["visit_number"].max().max() if "visit_number" in df_clean.columns else 1),
+            "temporal_snapshots": db_stats["temporal_records_count"],
+            "numeric_delta_availability": int((df_clean.groupby("patient_id")["visit_number"].count() > 1).sum()),
             "temporal_variables_count": 10,
             "numerical_delta_features_count": 8,
             "categorical_change_features_count": 2,
@@ -746,9 +911,9 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
             "source_variables_count": 10,
             "source_variables": [VARIABLE_METADATA[v]["label"] for v in ALL_10_TEMPORAL_VARIABLES],
             "numerical_delta_features_count": 8,
-            "numerical_delta_features": NUMERICAL_DELTA_FIELDS,
+            "numerical_delta_features": [f"{v}_change" for v in CRITICAL_NUMERICAL_FEATURES],
             "categorical_change_features_count": 2,
-            "categorical_change_features": CATEGORICAL_CHANGED_FIELDS,
+            "categorical_change_features": [f"{v}_changed" for v in CRITICAL_LIFESTYLE_FEATURES],
         },
         "smote": smote_info,
         "split": {
@@ -766,7 +931,7 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
         "after_temporal": {
             "models": temp_comparison,
             "best_model": temp_best_row,
-            "features_used": len(ALL_MODEL_FEATURE_COLS),
+            "features_used": len(model_features),
         },
         "comparative_analysis": comparative_analysis,
         "comparison": temp_comparison,
@@ -796,6 +961,7 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
 def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
     """
     Predict CVD risk for a patient using their latest visit and genuine preceding visit.
+    Uses temporal_patient_data and patient_visits from PostgreSQL.
     """
     artifact_path = os.path.join(MODEL_ARTIFACT_DIR, "temporal_model_artifact.joblib")
     if not os.path.exists(artifact_path):
@@ -803,14 +969,14 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
 
     artifact = joblib.load(artifact_path)
     model = artifact["model"]
-    preprocessor = artifact["preprocessor"]
+    preprocessor = sanitize_preprocessor(artifact["preprocessor"])
     feature_cols = artifact["feature_columns"]
 
     session = get_session()
     try:
         visits_query = text("""
             SELECT * FROM patient_visits
-            WHERE source_patient_id = :pid
+            WHERE patient_id = :pid
             ORDER BY visit_date ASC, id ASC
         """)
         rows = session.execute(visits_query, {"pid": str(patient_id)}).mappings().all()
@@ -825,8 +991,10 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
             current_data=latest_visit,
             previous_data=previous_visit,
             patient_id=str(patient_id),
-            visit_id=latest_visit.get("id"),
-            assessment_date=latest_visit.get("visit_date"),
+            current_visit_id=latest_visit.get("id"),
+            previous_visit_id=previous_visit.get("id") if previous_visit else None,
+            current_visit_date=latest_visit.get("visit_date"),
+            previous_visit_date=previous_visit.get("visit_date") if previous_visit else None,
         )
 
         num_cols = artifact.get("num_cols", [])
@@ -837,7 +1005,13 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
             val = None
             if c in latest_visit:
                 val = latest_visit[c]
-            elif c.startswith("delta_") and c in snapshot:
+            elif c in snapshot:
+                val = snapshot[c]
+            elif c.startswith("prev_") and c in snapshot:
+                val = snapshot[c]
+            elif c.endswith("_change") and c in snapshot:
+                val = snapshot[c]
+            elif c.endswith("_rate") and c in snapshot:
                 val = snapshot[c]
             elif c.endswith("_changed") and c in snapshot:
                 val = snapshot[c]
@@ -865,6 +1039,13 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
                 row_dict[c] = str(val) if (val is not None and str(val) != "nan") else "missing"
 
         pred_df = pd.DataFrame([row_dict])
+        for c in num_cols:
+            if c in pred_df.columns:
+                pred_df[c] = pd.to_numeric(pred_df[c], errors="coerce")
+        for c in cat_cols:
+            if c in pred_df.columns:
+                pred_df[c] = pred_df[c].astype(str)
+
         proc_data = preprocessor.transform(pred_df)
 
         prediction_label = int(model.predict(proc_data)[0])
@@ -877,10 +1058,11 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
         risk_category = "High Risk" if prediction_label == 1 or risk_score >= 0.5 else "Low Risk"
 
         num_details = []
-        for v in NUMERICAL_VARIABLES:
+        for v in CRITICAL_NUMERICAL_FEATURES:
             cur_v = snapshot.get(f"current_{v}")
             prev_v = snapshot.get(f"previous_{v}")
-            delta_v = snapshot.get(f"delta_{v}")
+            change_v = snapshot.get(f"{v}_change")
+            rate_v = snapshot.get(f"{v}_rate")
             unit = VARIABLE_METADATA.get(v, {}).get("unit", "")
             lbl = VARIABLE_METADATA.get(v, {}).get("label", v)
             num_details.append({
@@ -889,12 +1071,14 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
                 "unit": unit,
                 "current": cur_v,
                 "previous": prev_v,
-                "delta": delta_v,
-                "status": "No previous visit available" if prev_v is None else (f"+{delta_v}" if delta_v is not None and delta_v > 0 else str(delta_v)),
+                "change": change_v,
+                "delta": change_v,
+                "rate": rate_v,
+                "status": "No previous visit available" if prev_v is None else (f"+{change_v}" if change_v is not None and change_v > 0 else str(change_v)),
             })
 
         cat_details = []
-        for v in CATEGORICAL_VARIABLES:
+        for v in CRITICAL_LIFESTYLE_FEATURES:
             cur_v = snapshot.get(f"current_{v}")
             prev_v = snapshot.get(f"previous_{v}")
             changed_v = snapshot.get(f"{v}_changed")
@@ -940,101 +1124,88 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
     finally:
         session.close()
 
+
 def insert_manual_visit(
     patient_id: str,
     clinical_data: Dict[str, Any],
     visit_date: datetime | None = None,
 ) -> Dict[str, Any]:
     """
-    Insert a manual clinical visit for a patient, calculate temporal snapshot,
-    and persist both the visit and the temporal snapshot to PostgreSQL.
+    Insert a manual clinical visit for a patient:
+      1. Create/get patient in 'patients' table.
+      2. Find immediately preceding visit from 'patient_visits'.
+      3. Insert new visit into 'patient_visits' (permanent history).
+      4. Upsert 'temporal_patient_data' with ONLY latest 2 visits.
+      5. Predict CVD risk using full temporal feature vector.
+      6. Store prediction in 'predictions' table.
     """
     visit_date = visit_date or datetime.utcnow()
     session = get_session()
     try:
-        # Find or create patient record
-        patient = session.query(Patient).filter(Patient.patient_code == str(patient_id)).first()
-        if not patient:
-            patient = Patient(patient_code=str(patient_id), created_at=datetime.utcnow())
-            session.add(patient)
-            session.flush()
+        pid = str(patient_id)
 
-        # Find immediately preceding visit of this same patient
+        # 1. Create / get patient
+        patient = create_patient(
+            session=session,
+            patient_id=pid,
+            name=clinical_data.get("name") or f"Patient {pid}",
+            gender=clinical_data.get("gender"),
+            age=clinical_data.get("age"),
+        )
+
+        # 2. Find immediately preceding visit
         prev_visit = TemporalFeatureService.get_immediately_previous_visit(
             session=session,
-            patient_id=str(patient_id),
+            patient_id=pid,
             before_date=visit_date,
         )
-        if isinstance(prev_visit, dict):
-            prev_dict = prev_visit
-        elif prev_visit is not None:
-            prev_dict = {c.name: getattr(prev_visit, c.name) for c in prev_visit.__table__.columns}
-        else:
-            prev_dict = None
 
-        # Build new visit object
-        visit = PatientVisit(
-            patient_id=patient.id,
-            source_patient_id=str(patient_id),
-            visit_timestamp=visit_date,
-            visit_date=visit_date,
-            age=clinical_data.get("age", 55),
-            gender=clinical_data.get("gender", "Male"),
-            bmi=clinical_data.get("bmi"),
-            chest_pain_type=clinical_data.get("chest_pain_type", "ASY"),
-            systolic_bp=clinical_data.get("systolic_bp"),
-            diastolic_bp=clinical_data.get("diastolic_bp"),
-            resting_heart_rate=clinical_data.get("resting_heart_rate"),
-            max_heart_rate=clinical_data.get("max_heart_rate"),
-            cholesterol=clinical_data.get("cholesterol"),
-            hdl=clinical_data.get("hdl"),
-            ldl=clinical_data.get("ldl"),
-            fasting_blood_sugar=clinical_data.get("fasting_blood_sugar"),
-            hba1c=clinical_data.get("hba1c"),
-            diabetes=clinical_data.get("diabetes", 0),
-            resting_ecg=clinical_data.get("resting_ecg", "Normal"),
-            exercise_angina=clinical_data.get("exercise_angina", "N"),
-            oldpeak=clinical_data.get("oldpeak", 0.0),
-            st_slope=clinical_data.get("st_slope", "Flat"),
-            num_major_vessels=clinical_data.get("num_major_vessels", 0),
-            thalassemia=clinical_data.get("thalassemia", "Normal"),
-            smoking=clinical_data.get("smoking", "No"),
-            smoking_status=clinical_data.get("smoking_status", clinical_data.get("smoking", "No")),
-            family_history=clinical_data.get("family_history", "No"),
-            physical_activity=clinical_data.get("physical_activity", "Moderate"),
-            stress_level=float(clinical_data.get("stress_level", 2.0)) if str(clinical_data.get("stress_level", "2")).replace(".", "").replace("-", "").isdigit() else 2.0,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        session.add(visit)
-        session.flush()
-
-        # Calculate temporal snapshot using authoritative service
-        cur_dict = {c.name: getattr(visit, c.name) for c in visit.__table__.columns}
-        snapshot = TemporalFeatureService.calculate_snapshot(
-            current_data=cur_dict,
-            previous_data=prev_dict,
-            patient_id=str(patient_id),
-            visit_id=visit.id,
-            assessment_date=visit_date,
-        )
-
-        # Persist temporal snapshot
-        ptf = TemporalFeatureService.persist_temporal_snapshot(
+        # 3. Create permanent visit record
+        visit_number = (session.query(PatientVisit).filter_by(patient_id=pid).count()) + 1
+        new_visit = create_visit(
             session=session,
-            snapshot=snapshot,
+            patient_id=pid,
+            visit_date=visit_date,
+            clinical_values=clinical_data,
+            visit_number=visit_number,
+        )
+
+        # 4. Upsert temporal_patient_data (represents ONLY latest 2 visits)
+        temp_record = TemporalFeatureService.upsert_temporal_patient_data(
+            session=session,
+            patient_id=pid,
+            current_visit=new_visit,
+            previous_visit=prev_visit,
         )
 
         session.commit()
-        return {
-            "patient_id": str(patient_id),
-            "visit_id": visit.id,
-            "visit_date": str(visit_date),
-            "temporal_snapshot": snapshot,
-            "has_previous_visit": prev_visit is not None,
-        }
+
+        # 5. Predict using temporal vector
+        pred_res = predict_latest_for_patient(pid)
+
+        # 6. Store prediction
+        with get_session() as s2:
+            create_prediction(
+                session=s2,
+                patient_id=pid,
+                visit_id=new_visit.id,
+                visit_date=visit_date,
+                prediction=pred_res["risk_prediction"],
+                probability=pred_res["risk_probability"],
+                risk_level=pred_res["risk_category"],
+                model_name=pred_res["model_name"],
+            )
+            s2.commit()
+
+        return pred_res
     except Exception:
         session.rollback()
         raise
     finally:
         session.close()
+
+
+# Compatibility helpers
+def load_visits_from_db(): pass
+def load_mapping(): return {}
+def generate_temporal_features(df): return df
