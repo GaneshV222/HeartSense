@@ -7,7 +7,6 @@ CRUD operations for patients, visits, and predictions using SQLAlchemy.
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models import Patient, PatientVisit, Prediction
-from app.config import FEATURE_NAMES
 
 
 # ── Patient CRUD ───────────────────────────────────────────────────────────────
@@ -41,16 +40,20 @@ def create_visit(
     patient_id: int,
     visit_timestamp: datetime,
     clinical_values: dict,
+    source_patient_id: str | None = None,
 ) -> PatientVisit:
     """
     Record a new clinical visit for a patient.
-
-    *clinical_values* should be a dict with feature names as keys.
     """
+    valid_cols = {c.name for c in PatientVisit.__table__.columns}
+    kwargs = {k: v for k, v in clinical_values.items() if k in valid_cols}
+
     visit = PatientVisit(
         patient_id=patient_id,
+        source_patient_id=source_patient_id or str(clinical_values.get('patient_id', patient_id)),
         visit_timestamp=visit_timestamp,
-        **{k: v for k, v in clinical_values.items() if k in FEATURE_NAMES},
+        visit_date=visit_timestamp,
+        **kwargs,
     )
     session.add(visit)
     session.commit()
@@ -63,7 +66,7 @@ def get_patient_visits(session: Session, patient_id: int) -> list[PatientVisit]:
     return (
         session.query(PatientVisit)
         .filter_by(patient_id=patient_id)
-        .order_by(PatientVisit.visit_timestamp.asc())
+        .order_by(PatientVisit.visit_date.asc())
         .all()
     )
 
@@ -73,7 +76,7 @@ def get_latest_visit(session: Session, patient_id: int) -> PatientVisit | None:
     return (
         session.query(PatientVisit)
         .filter_by(patient_id=patient_id)
-        .order_by(PatientVisit.visit_timestamp.desc())
+        .order_by(PatientVisit.visit_date.desc())
         .first()
     )
 
@@ -87,9 +90,9 @@ def get_previous_visit(session: Session, patient_id: int, before_visit_id: int) 
         session.query(PatientVisit)
         .filter(
             PatientVisit.patient_id == patient_id,
-            PatientVisit.visit_timestamp < current.visit_timestamp,
+            PatientVisit.visit_date < current.visit_date,
         )
-        .order_by(PatientVisit.visit_timestamp.desc())
+        .order_by(PatientVisit.visit_date.desc())
         .first()
     )
 
@@ -102,17 +105,21 @@ def create_prediction(
     visit_id: int,
     prediction: int,
     probability: float | None = None,
+    risk_level: str | None = None,
     model_name: str | None = None,
-    model_version: str | None = None,
+    model_type: str | None = "temporal",
+    patient_code: str | None = None,
 ) -> Prediction:
     """Store a prediction result linked to a visit."""
     pred = Prediction(
         patient_id=patient_id,
+        patient_code=patient_code,
         visit_id=visit_id,
         prediction=prediction,
         probability=probability,
+        risk_level=risk_level,
         model_name=model_name,
-        model_version=model_version,
+        model_type=model_type,
     )
     session.add(pred)
     session.commit()
@@ -125,7 +132,6 @@ def get_patient_predictions(session: Session, patient_id: int) -> list[Predictio
     return (
         session.query(Prediction)
         .filter_by(patient_id=patient_id)
-        .join(PatientVisit, Prediction.visit_id == PatientVisit.id)
-        .order_by(PatientVisit.visit_timestamp.asc())
+        .order_by(Prediction.created_at.asc())
         .all()
     )

@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 const api = axios.create({
   baseURL: (import.meta as any).env.VITE_API_URL || 'http://127.0.0.1:8000/api',
@@ -9,8 +9,8 @@ export const assessRisk = async (data: any) => {
   return response.data;
 };
 
-export const getHistory = async (patientCode: string) => {
-  const response = await api.get(`/history/${patientCode}`);
+export const getPatientTemporalProfile = async (patientId: string) => {
+  const response = await api.get(`/patients/${patientId}/temporal`);
   return response.data;
 };
 

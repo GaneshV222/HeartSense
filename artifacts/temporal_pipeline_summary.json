@@ -1,0 +1,416 @@
+{
+  "mapping": {
+    "dataset_path": "backend/data/_temporal_smoke_sample.csv",
+    "patient_id": "patient_id",
+    "visit_date": "visit_date",
+    "target": "prediction",
+    "numerical": [
+      "age",
+      "bmi",
+      "systolic_bp",
+      "diastolic_bp",
+      "resting_heart_rate",
+      "max_heart_rate",
+      "cholesterol",
+      "hdl",
+      "ldl",
+      "hba1c",
+      "oldpeak",
+      "num_major_vessels",
+      "stress_level"
+    ],
+    "categorical": [
+      "gender",
+      "chest_pain_type",
+      "fasting_blood_sugar",
+      "diabetes",
+      "resting_ecg",
+      "exercise_angina",
+      "st_slope",
+      "thalassemia",
+      "smoking",
+      "family_history",
+      "physical_activity"
+    ],
+    "clinical": [
+      "age",
+      "bmi",
+      "chest_pain_type",
+      "cholesterol",
+      "diabetes",
+      "diastolic_bp",
+      "exercise_angina",
+      "family_history",
+      "fasting_blood_sugar",
+      "gender",
+      "hba1c",
+      "hdl",
+      "ldl",
+      "max_heart_rate",
+      "num_major_vessels",
+      "oldpeak",
+      "physical_activity",
+      "resting_ecg",
+      "resting_heart_rate",
+      "smoking",
+      "st_slope",
+      "stress_level",
+      "systolic_bp",
+      "thalassemia"
+    ],
+    "lifestyle": [
+      "physical_activity",
+      "smoking"
+    ],
+    "systolic_bp": "systolic_bp",
+    "diastolic_bp": "diastolic_bp",
+    "cholesterol": "cholesterol",
+    "glucose": "fasting_blood_sugar",
+    "weight": null,
+    "bmi": "bmi",
+    "smoking": "smoking",
+    "activity": "physical_activity",
+    "diet": null,
+    "alcohol": null
+  },
+  "preprocessing": {
+    "Original records": 5000,
+    "Original columns": 26,
+    "Empty rows removed": 0,
+    "Duplicate rows removed": 0,
+    "Invalid dates removed/fixed": 0,
+    "Missing values handled": 3144,
+    "Valid records after cleaning": 5000,
+    "Unique patients": 5000,
+    "Patients with multiple visits": 0,
+    "Patients with one visit": 5000,
+    "Earliest visit": "2026-01-01 00:00:00",
+    "Latest visit": "2026-01-04 11:19:00"
+  },
+  "database": {
+    "records_already_existing": 5000,
+    "new_records_inserted": 5000,
+    "records_updated": 0,
+    "duplicates_skipped": 0
+  },
+  "temporal_stats": {
+    "total_patients": 5000,
+    "total_visits": 5000,
+    "patients_with_multiple_visits": 0,
+    "average_visits_per_patient": 1.0,
+    "minimum_visits": 1,
+    "maximum_visits": 1,
+    "date_range": {
+      "earliest": "2026-01-01 00:00:00",
+      "latest": "2026-01-04 11:19:00"
+    }
+  },
+  "model_features": {
+    "current_features": [
+      "current_age",
+      "current_bmi",
+      "current_chest_pain_type",
+      "current_cholesterol",
+      "current_diabetes",
+      "current_diastolic_bp",
+      "current_exercise_angina",
+      "current_family_history",
+      "current_fasting_blood_sugar",
+      "current_gender",
+      "current_hba1c",
+      "current_hdl",
+      "current_ldl",
+      "current_max_heart_rate",
+      "current_num_major_vessels",
+      "current_oldpeak",
+      "current_physical_activity",
+      "current_resting_ecg",
+      "current_resting_heart_rate",
+      "current_smoking",
+      "current_st_slope",
+      "current_stress_level",
+      "current_systolic_bp",
+      "current_thalassemia"
+    ],
+    "previous_value_features": [
+      "previous_systolic_bp",
+      "previous_diastolic_bp",
+      "previous_cholesterol",
+      "previous_fasting_blood_sugar",
+      "previous_bmi",
+      "previous_physical_activity",
+      "previous_smoking"
+    ],
+    "delta_features": [
+      "delta_systolic_bp",
+      "delta_diastolic_bp",
+      "delta_cholesterol",
+      "delta_fasting_blood_sugar",
+      "delta_bmi",
+      "physical_activity_changed",
+      "smoking_changed"
+    ],
+    "trend_features": [
+      "systolic_bp_trend",
+      "diastolic_bp_trend",
+      "cholesterol_trend",
+      "fasting_blood_sugar_trend",
+      "bmi_trend"
+    ],
+    "time_based_features": [
+      "visit_number",
+      "number_of_previous_visits",
+      "time_since_first_visit",
+      "days_since_previous_visit",
+      "months_since_previous_visit"
+    ],
+    "lifestyle_temporal_features": [
+      "current_physical_activity",
+      "current_smoking",
+      "previous_physical_activity",
+      "physical_activity_changed",
+      "previous_smoking",
+      "smoking_changed"
+    ],
+    "numeric_features": [
+      "visit_number",
+      "number_of_previous_visits",
+      "patient_followup_count",
+      "time_since_first_visit",
+      "days_since_previous_visit",
+      "months_since_previous_visit",
+      "current_age",
+      "current_bmi",
+      "current_cholesterol",
+      "current_diastolic_bp",
+      "current_fasting_blood_sugar",
+      "current_hba1c",
+      "current_hdl",
+      "current_ldl",
+      "current_max_heart_rate",
+      "current_num_major_vessels",
+      "current_oldpeak",
+      "current_resting_heart_rate",
+      "current_stress_level",
+      "current_systolic_bp",
+      "previous_systolic_bp",
+      "delta_systolic_bp",
+      "systolic_bp_trend",
+      "previous_diastolic_bp",
+      "delta_diastolic_bp",
+      "diastolic_bp_trend",
+      "previous_cholesterol",
+      "delta_cholesterol",
+      "cholesterol_trend",
+      "previous_fasting_blood_sugar",
+      "delta_fasting_blood_sugar",
+      "fasting_blood_sugar_trend",
+      "previous_bmi",
+      "delta_bmi",
+      "bmi_trend",
+      "physical_activity_changed",
+      "smoking_changed"
+    ],
+    "categorical_features": [
+      "current_chest_pain_type",
+      "current_diabetes",
+      "current_exercise_angina",
+      "current_family_history",
+      "current_gender",
+      "current_physical_activity",
+      "current_resting_ecg",
+      "current_smoking",
+      "current_st_slope",
+      "current_thalassemia",
+      "previous_physical_activity",
+      "previous_smoking"
+    ],
+    "feature_columns": [
+      "visit_number",
+      "number_of_previous_visits",
+      "patient_followup_count",
+      "time_since_first_visit",
+      "days_since_previous_visit",
+      "months_since_previous_visit",
+      "current_age",
+      "current_bmi",
+      "current_chest_pain_type",
+      "current_cholesterol",
+      "current_diabetes",
+      "current_diastolic_bp",
+      "current_exercise_angina",
+      "current_family_history",
+      "current_fasting_blood_sugar",
+      "current_gender",
+      "current_hba1c",
+      "current_hdl",
+      "current_ldl",
+      "current_max_heart_rate",
+      "current_num_major_vessels",
+      "current_oldpeak",
+      "current_physical_activity",
+      "current_resting_ecg",
+      "current_resting_heart_rate",
+      "current_smoking",
+      "current_st_slope",
+      "current_stress_level",
+      "current_systolic_bp",
+      "current_thalassemia",
+      "previous_systolic_bp",
+      "delta_systolic_bp",
+      "systolic_bp_trend",
+      "previous_diastolic_bp",
+      "delta_diastolic_bp",
+      "diastolic_bp_trend",
+      "previous_cholesterol",
+      "delta_cholesterol",
+      "cholesterol_trend",
+      "previous_fasting_blood_sugar",
+      "delta_fasting_blood_sugar",
+      "fasting_blood_sugar_trend",
+      "previous_bmi",
+      "delta_bmi",
+      "bmi_trend",
+      "previous_physical_activity",
+      "physical_activity_changed",
+      "previous_smoking",
+      "smoking_changed"
+    ]
+  },
+  "comparison": [
+    {
+      "model_name": "Logistic Regression",
+      "accuracy": 0.7698,
+      "precision": 0.7699,
+      "recall": 0.7698,
+      "f1": 0.7698,
+      "roc_auc": 0.8504,
+      "cv_score": 0.7714,
+      "confusion_matrix": [
+        [
+          529,
+          166
+        ],
+        [
+          154,
+          541
+        ]
+      ]
+    },
+    {
+      "model_name": "Random Forest",
+      "accuracy": 0.8446,
+      "precision": 0.8447,
+      "recall": 0.8446,
+      "f1": 0.8446,
+      "roc_auc": 0.9329,
+      "cv_score": 0.8389,
+      "confusion_matrix": [
+        [
+          582,
+          113
+        ],
+        [
+          103,
+          592
+        ]
+      ]
+    },
+    {
+      "model_name": "Gradient Boosting",
+      "accuracy": 0.8525,
+      "precision": 0.8525,
+      "recall": 0.8525,
+      "f1": 0.8525,
+      "roc_auc": 0.9325,
+      "cv_score": 0.8423,
+      "confusion_matrix": [
+        [
+          591,
+          104
+        ],
+        [
+          101,
+          594
+        ]
+      ]
+    },
+    {
+      "model_name": "Naive Bayes",
+      "accuracy": 0.6338,
+      "precision": 0.724,
+      "recall": 0.6338,
+      "f1": 0.5928,
+      "roc_auc": 0.8026,
+      "cv_score": 0.6021,
+      "confusion_matrix": [
+        [
+          661,
+          34
+        ],
+        [
+          475,
+          220
+        ]
+      ]
+    },
+    {
+      "model_name": "SVM",
+      "accuracy": 0.8007,
+      "precision": 0.8008,
+      "recall": 0.8007,
+      "f1": 0.8007,
+      "roc_auc": 0.8874,
+      "cv_score": 0.7943,
+      "confusion_matrix": [
+        [
+          550,
+          145
+        ],
+        [
+          132,
+          563
+        ]
+      ]
+    },
+    {
+      "model_name": "KNN",
+      "accuracy": 0.7957,
+      "precision": 0.8175,
+      "recall": 0.7957,
+      "f1": 0.7921,
+      "roc_auc": 0.8851,
+      "cv_score": 0.7819,
+      "confusion_matrix": [
+        [
+          462,
+          233
+        ],
+        [
+          51,
+          644
+        ]
+      ]
+    }
+  ],
+  "best_name": "Random Forest",
+  "smote": {
+    "before": {
+      "0": 3473,
+      "1": 1527
+    },
+    "after": {
+      "1": 3473,
+      "0": 3473
+    },
+    "samples_before": 5000,
+    "samples_after": 6946,
+    "synthetic_samples_created": 1946
+  },
+  "split": {
+    "train_size": 5556,
+    "test_size": 1390,
+    "total": 6946,
+    "test_ratio": 0.2
+  }
+}

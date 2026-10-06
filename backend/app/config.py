@@ -8,80 +8,44 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env file if present
-load_dotenv()
-
-# ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATASET_PATH = os.getenv("DATASET_PATH", str(BASE_DIR / "data" / "dataset.csv"))
+WORKSPACE_DIR = BASE_DIR.parent
+
+# Search and load .env from multiple candidate locations
+for env_path in [
+    BASE_DIR / ".env",
+    WORKSPACE_DIR / ".env",
+    BASE_DIR.parent.parent / ".env",
+    Path.cwd() / ".env",
+]:
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+
+# Paths
+DATASET_PATH = os.getenv("DATASET_PATH", str(BASE_DIR / "data" / "heart_disease_prediction_2026.csv"))
+if not os.path.exists(DATASET_PATH):
+    for candidate in [
+        BASE_DIR / "data" / "heart_disease_prediction_2026.csv",
+        WORKSPACE_DIR / "heart_disease_prediction_2026.csv",
+        WORKSPACE_DIR / "backend" / "data" / "heart_disease_prediction_2026.csv",
+    ]:
+        if candidate.exists():
+            DATASET_PATH = str(candidate)
+            break
+
 MODEL_ARTIFACT_DIR = os.getenv("MODEL_ARTIFACT_DIR", str(BASE_DIR / "artifacts"))
+if not os.path.exists(MODEL_ARTIFACT_DIR):
+    os.makedirs(MODEL_ARTIFACT_DIR, exist_ok=True)
 
-# ── Database ───────────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./cvd_prediction.db")
+# Database
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:VishnuS%402023@localhost:5432/heartsense"
+)
 
-# ── ML Pipeline ────────────────────────────────────────────────────────────────
+# ML Pipeline
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 CV_FOLDS = 5
 SMOTE_RANDOM_STATE = 42
-FEATURE_SELECTION_K = 10  # number of top features to select (or "all")
-
-# ── Cleveland Heart Disease Dataset Feature Schema ─────────────────────────────
-# These are the 13 clinical features from the UCI Cleveland dataset.
-FEATURE_NAMES = [
-    "age",
-    "sex",
-    "cp",
-    "trestbps",
-    "chol",
-    "fbs",
-    "restecg",
-    "thalach",
-    "exang",
-    "oldpeak",
-    "slope",
-    "ca",
-    "thal",
-]
-
-TARGET_NAME = "target"
-
-# Human-readable labels for the Streamlit UI
-FEATURE_LABELS = {
-    "age": "Age (years)",
-    "sex": "Sex (1=Male, 0=Female)",
-    "cp": "Chest Pain Type (0-3)",
-    "trestbps": "Resting Blood Pressure (mm Hg)",
-    "chol": "Serum Cholesterol (mg/dl)",
-    "fbs": "Fasting Blood Sugar > 120 mg/dl (1=True, 0=False)",
-    "restecg": "Resting ECG Results (0-2)",
-    "thalach": "Max Heart Rate Achieved",
-    "exang": "Exercise Induced Angina (1=Yes, 0=No)",
-    "oldpeak": "ST Depression (oldpeak)",
-    "slope": "Slope of Peak Exercise ST (0-2)",
-    "ca": "Number of Major Vessels (0-3)",
-    "thal": "Thalassemia (0=Normal, 1=Fixed Defect, 2=Reversible Defect)",
-}
-
-# Numerical features (used for temporal comparison)
-NUMERICAL_FEATURES = ["age", "trestbps", "chol", "thalach", "oldpeak"]
-
-# Categorical features
-CATEGORICAL_FEATURES = ["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"]
-
-# ── Model Configuration ───────────────────────────────────────────────────────
-# The 6 models to train, compare, and evaluate.
-MODEL_NAMES = [
-    "Logistic Regression",
-    "Random Forest",
-    "Decision Tree",
-    "SVM",
-    "KNN",
-    "Naive Bayes",
-]
-
-# Best-model selection priority:
-#   1. ROC-AUC   (primary)
-#   2. Recall    (secondary – detecting CVD is critical)
-#   3. F1-Score  (tertiary)
-BEST_MODEL_CRITERIA = ["roc_auc", "recall", "f1"]
+FEATURE_SELECTION_K = "all"

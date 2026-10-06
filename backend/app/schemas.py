@@ -1,23 +1,14 @@
-from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
-
-class ClinicalData(BaseModel):
-    age: int
-    sex: int
-    cp: int
-    trestbps: int
-    chol: int
-    fbs: int
-    restecg: int
-    thalach: int
-    exang: int
-    oldpeak: float
-    slope: int
-    ca: int
-    thal: int
+from pydantic import BaseModel, Extra
+from typing import Optional, Dict, Any
 
 class AssessmentRequest(BaseModel):
-    patientCode: str
+    patientCode: Optional[str] = None
+    patient_id: Optional[str] = None
     patientName: Optional[str] = None
+    patient_name: Optional[str] = None
     visitDate: Optional[str] = None
-    clinicalData: ClinicalData
+    visit_date: Optional[str] = None
+    clinicalData: Optional[Dict[str, Any]] = None
+
+    class Config:
+        extra = Extra.allow

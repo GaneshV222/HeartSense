@@ -105,7 +105,7 @@ The frontend will run at `http://localhost:5173` (or `5174`).
 cd backend
 python -m venv .venv
 .venv\Scripts\activate  # Windows
-pip install -r requirements.txt
+pip install -r ..\requirements.txt
 uvicorn app.main:app --reload
 ```
 The API will run at `http://127.0.0.1:8000`.
@@ -145,4 +145,3 @@ HeartSense/
 
 ## 19. Disclaimer
 This assessment tool is for research and decision-support purposes only. It is **not** a medical diagnosis. Consult a qualified healthcare professional for medical advice.
-

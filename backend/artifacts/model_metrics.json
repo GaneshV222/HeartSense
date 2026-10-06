@@ -1,9 +1,27 @@
 {
-  "model_name": "Naive Bayes",
-  "accuracy": 0.8788,
-  "precision": 0.8378,
-  "recall": 0.9394,
-  "specificity": 0.8182,
-  "f1": 0.8857,
-  "roc_auc": 0.9247
+  "model_name": "XGBoost",
+  "accuracy": 0.8415,
+  "precision": 0.8426,
+  "recall": 0.8415,
+  "specificity": 0.8699,
+  "f1": 0.8414,
+  "roc_auc": 0.9228,
+  "cv_score": 0.8056,
+  "confusion_matrix": {
+    "tn": 12190,
+    "fp": 1823,
+    "fn": 2619,
+    "tp": 11393,
+    "matrix": [
+      [
+        12190,
+        1823
+      ],
+      [
+        2619,
+        11393
+      ]
+    ]
+  },
+  "training_time_seconds": 3.66
 }
