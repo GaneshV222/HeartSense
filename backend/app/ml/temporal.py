@@ -1,86 +1,70 @@
 """
-HeartSense – Temporal Feature Extraction
+HeartSense – Temporal Module
 
-Compares a patient's current visit with their most recent previous visit
-to calculate changes and determine direction for each numerical feature.
+Exposes the authoritative TemporalFeatureService and helper functions
+for computing and inspecting temporal clinical changes.
 """
 
-import pandas as pd
-from app.config import FEATURE_NAMES, FEATURE_LABELS, NUMERICAL_FEATURES
+from typing import Any, Dict, List, Optional
+from datetime import datetime
+from app.services.temporal_service import (
+    TemporalFeatureService,
+    NUMERICAL_VARIABLES,
+    CATEGORICAL_VARIABLES,
+    ALL_10_TEMPORAL_VARIABLES,
+    NUMERICAL_DELTA_FIELDS,
+    CATEGORICAL_CHANGED_FIELDS,
+    VARIABLE_METADATA,
+)
 
 
-def compute_temporal_changes(current_values: dict, previous_values: dict) -> list[dict]:
+def compute_temporal_changes(current_values: dict, previous_values: Optional[dict]) -> List[dict]:
     """
-    Compare current vs. previous clinical values.
-
-    Parameters
-    ----------
-    current_values  : dict  – feature_name → value for the current visit
-    previous_values : dict  – feature_name → value for the previous visit
-
-    Returns
-    -------
-    list[dict] with keys: feature, label, previous, current, change, direction
+    Compute structured changes across the 10 core temporal variables.
     """
+    snapshot = TemporalFeatureService.calculate_snapshot(
+        current_data=current_values,
+        previous_data=previous_values,
+        patient_id=str(current_values.get("patient_id", "Unknown")),
+    )
+
     changes = []
-    for feat in FEATURE_NAMES:
-        if feat not in current_values or feat not in previous_values:
-            continue
+    # 8 Numerical
+    for var in NUMERICAL_VARIABLES:
+        details = snapshot["numerical_details"][var]
+        curr = details["current"]
+        prev = details["previous"]
+        delta = details["delta"]
 
-        curr = float(current_values[feat])
-        prev = float(previous_values[feat])
-        diff = round(curr - prev, 2)
-
-        if diff > 0:
-            direction = "Increased"
-        elif diff < 0:
-            direction = "Decreased"
+        if delta is not None:
+            direction = "Increased" if delta > 0 else ("Decreased" if delta < 0 else "Stable")
         else:
-            direction = "Stable"
+            direction = "No Previous Visit"
 
         changes.append({
-            "feature": feat,
-            "label": FEATURE_LABELS.get(feat, feat),
+            "feature": var,
+            "label": details["label"],
+            "unit": details["unit"],
+            "type": "numerical",
             "previous": prev,
             "current": curr,
-            "change": diff,
+            "change": delta,
+            "delta": delta,
             "direction": direction,
         })
+
+    # 2 Categorical
+    for var in CATEGORICAL_VARIABLES:
+        details = snapshot["categorical_details"][var]
+        changes.append({
+            "feature": var,
+            "label": details["label"],
+            "unit": "",
+            "type": "categorical",
+            "previous": details["previous"],
+            "current": details["current"],
+            "changed": details["changed"],
+            "direction": "Changed" if details["changed"] else ("Unchanged" if details["changed"] is False else "No Previous Visit"),
+        })
+
     return changes
-
-
-def summarize_risk_changes(changes: list[dict]) -> dict:
-    """
-    Produce a human-readable summary of concerning / improving changes.
-
-    Concerning increases:  trestbps ↑, chol ↑, oldpeak ↑, fbs ↑
-    Concerning decreases:  thalach ↓
-    """
-    concerning_up = {"trestbps", "chol", "oldpeak", "fbs"}
-    concerning_down = {"thalach"}
-
-    concerning = []
-    improving = []
-    stable = []
-
-    for c in changes:
-        feat = c["feature"]
-        d = c["direction"]
-        if d == "Stable":
-            stable.append(c)
-        elif (feat in concerning_up and d == "Increased") or \
-             (feat in concerning_down and d == "Decreased"):
-            concerning.append(c)
-        elif (feat in concerning_up and d == "Decreased") or \
-             (feat in concerning_down and d == "Increased"):
-            improving.append(c)
-        else:
-            # Generic features – just note the change
-            stable.append(c)
-
-    return {
-        "concerning": concerning,
-        "improving": improving,
-        "stable": stable,
-        "total_changes": len(changes),
-    }

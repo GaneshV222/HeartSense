@@ -1,27 +1,28 @@
 {
-  "model_name": "XGBoost",
-  "accuracy": 0.8415,
-  "precision": 0.8426,
-  "recall": 0.8415,
-  "specificity": 0.8699,
-  "f1": 0.8414,
-  "roc_auc": 0.9228,
-  "cv_score": 0.8056,
+  "model_name": "LightGBM",
+  "model_type": "ML Ensemble",
+  "accuracy": 0.8512,
+  "precision": 0.8527,
+  "recall": 0.8512,
+  "specificity": 0.8839,
+  "f1": 0.851,
+  "roc_auc": 0.9303,
+  "pr_auc": 0.9412,
   "confusion_matrix": {
-    "tn": 12190,
-    "fp": 1823,
-    "fn": 2619,
-    "tp": 11393,
+    "tn": 12386,
+    "fp": 1627,
+    "fn": 2544,
+    "tp": 11468,
     "matrix": [
       [
-        12190,
-        1823
+        12386,
+        1627
       ],
       [
-        2619,
-        11393
+        2544,
+        11468
       ]
     ]
   },
-  "training_time_seconds": 3.66
+  "training_time_seconds": 1.14
 }

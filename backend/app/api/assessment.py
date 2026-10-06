@@ -1,3 +1,7 @@
+"""
+HeartSense – Patient Assessment API
+"""
+
 import re
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
@@ -5,12 +9,12 @@ from app.schemas import AssessmentRequest
 from app.ml.temporal_pipeline import (
     insert_manual_visit,
     predict_latest_for_patient,
-    load_visits_from_db,
-    load_mapping,
-    generate_temporal_features
 )
+from app.services.temporal_service import TemporalFeatureService
+from app.database import get_session
 
 router = APIRouter()
+
 
 def normalize_patient_id(value: object) -> str | None:
     if value is None:
@@ -21,6 +25,7 @@ def normalize_patient_id(value: object) -> str | None:
     cleaned = re.sub(r"^patient\s*id\s*[:#-]?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^id\s*[:#-]?\s*", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip() or None
+
 
 @router.post("/assessment/predict")
 def predict_risk(request: AssessmentRequest):
@@ -58,10 +63,10 @@ def predict_risk(request: AssessmentRequest):
             "prediction": {
                 "prediction": result["risk_prediction"],
                 "probability": result["risk_probability"],
-                "model_name": "Dynamic Temporal Risk Model",
-                "label": "High Risk – Disease Predicted" if result["risk_prediction"] == 1 else "Low Risk – No Disease Predicted",
+                "model_name": result.get("model_name", "HeartSense ML/DL Model"),
+                "label": "Higher Cardiovascular Risk" if result["risk_prediction"] == 1 else "Lower Cardiovascular Risk",
             },
-            "is_first_visit": result["number_of_visits"] <= 1,
+            "is_first_visit": result["is_first_visit"],
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -70,24 +75,35 @@ def predict_risk(request: AssessmentRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.get("/patients/{patient_id}/temporal")
 def get_patient_temporal_profile(patient_id: str):
     try:
-        return predict_latest_for_patient(patient_id)
+        cleaned_id = normalize_patient_id(patient_id)
+        if not cleaned_id:
+            raise ValueError("Invalid patient ID")
+        return predict_latest_for_patient(cleaned_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.get("/patients/{patient_id}/visits")
 def get_patient_visits_api(patient_id: str):
-    visits = load_visits_from_db(patient_id)
-    if visits.empty:
-        raise HTTPException(status_code=404, detail="No visits found for this patient")
-    mapping = load_mapping()
-    temporal = generate_temporal_features(visits, mapping)
-    return {
-        "patient_id": patient_id,
-        "visits": visits.astype(str).to_dict(orient="records"),
-        "temporal": temporal.astype(str).to_dict(orient="records")
-    }
+    cleaned_id = normalize_patient_id(patient_id)
+    if not cleaned_id:
+        raise HTTPException(status_code=400, detail="Invalid patient ID")
+
+    session = get_session()
+    try:
+        timeline = TemporalFeatureService.get_patient_temporal_timeline(session, cleaned_id)
+        if not timeline:
+            raise HTTPException(status_code=404, detail=f"No visits found for patient '{cleaned_id}'")
+        return {
+            "patient_id": cleaned_id,
+            "total_visits": len(timeline),
+            "timeline": timeline,
+        }
+    finally:
+        session.close()
