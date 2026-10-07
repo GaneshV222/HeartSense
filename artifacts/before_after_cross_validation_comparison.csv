@@ -1,0 +1,6 @@
+model_name,model_type,folds,before_accuracy_mean,before_accuracy_std,after_accuracy_mean,after_accuracy_std,accuracy_lift,accuracy_lift_pct,before_f1_mean,after_f1_mean,f1_lift,before_roc_auc_mean,after_roc_auc_mean,roc_auc_lift,before_recall_mean,after_recall_mean,recall_lift,before_balanced_accuracy_mean,after_balanced_accuracy_mean,balanced_accuracy_lift,before_mcc_mean,after_mcc_mean,mcc_lift,after_meets_95_accuracy_target
+XGBoost,ML Ensemble,5,0.8343,0.0022,0.8395,0.0021,0.0052,+0.52%,0.8341,0.8392,0.0051,0.917,0.9214,0.0044,0.8343,0.8395,0.0052,0.8343,0.8395,0.0052,0.6698,0.6812,0.0114,False
+LightGBM,ML Ensemble,5,0.8345,0.0012,0.8389,0.0019,0.0044,+0.44%,0.8343,0.8386,0.0043,0.9171,0.921,0.0039,0.8345,0.8389,0.0044,0.8345,0.8389,0.0044,0.6703,0.6798,0.0095,False
+Gradient Boosting,ML Ensemble,5,0.824,0.0026,0.8318,0.0022,0.0078,+0.78%,0.8239,0.8316,0.0077,0.9075,0.915,0.0075,0.824,0.8318,0.0078,0.824,0.8318,0.0078,0.6487,0.6651,0.0164,False
+Compact MLP Neural Network,Deep Learning,5,0.7985,0.0021,0.8006,0.0025,0.0021,+0.21%,0.7985,0.8005,0.002,0.882,0.8846,0.0026,0.7985,0.8006,0.0021,0.7985,0.8006,0.0021,0.5973,0.6013,0.004,False
+AdaBoost,ML Ensemble,5,0.7387,0.0036,0.7523,0.0029,0.0136,+1.36%,0.7386,0.7522,0.0136,0.8171,0.8334,0.0163,0.7387,0.7523,0.0136,0.7387,0.7523,0.0136,0.4779,0.505,0.0271,False

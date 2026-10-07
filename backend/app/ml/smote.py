@@ -27,24 +27,22 @@ def apply_smote(X: pd.DataFrame, y: pd.Series, random_state: int = SMOTE_RANDOM_
     """
     Apply SMOTE to balance the dataset.
 
-    Parameters
-    ----------
-    X : pd.DataFrame – feature matrix
-    y : pd.Series    – target vector
-
-    Returns
-    -------
-    X_resampled : pd.DataFrame
-    y_resampled : pd.Series
-    info : dict   – contains 'before' and 'after' distributions
+    Converts non-numeric columns to a numeric one-hot representation before oversampling,
+    so categorical feature sets remain compatible with sklearn's SMOTE pipeline.
     """
     dist_before = get_class_distribution(y)
 
-    smote = SMOTE(random_state=random_state)
-    X_res, y_res = smote.fit_resample(X, y)
+    X_prepared = X.copy() if isinstance(X, pd.DataFrame) else pd.DataFrame(X)
+    if isinstance(X_prepared, pd.DataFrame):
+        non_numeric = list(X_prepared.select_dtypes(exclude=[np.number]).columns)
+        if non_numeric:
+            X_prepared = pd.get_dummies(X_prepared, columns=non_numeric, dtype=float)
+        X_prepared = X_prepared.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
-    # Keep DataFrame format with column names
-    X_resampled = pd.DataFrame(X_res, columns=X.columns)
+    smote = SMOTE(random_state=random_state)
+    X_res, y_res = smote.fit_resample(X_prepared, y)
+
+    X_resampled = pd.DataFrame(X_res, columns=X_prepared.columns)
     y_resampled = pd.Series(y_res, name=y.name)
 
     dist_after = get_class_distribution(y_resampled)

@@ -59,9 +59,6 @@ export default function Assessment() {
             <h1 className="page-title" style={{ fontSize: '2.2rem', color: '#1a365d', marginBottom: '0.5rem' }}>
               Lookup Existing Patient
             </h1>
-            <p className="page-subtitle" style={{ color: '#4a5568', fontSize: '1.1rem', margin: 0 }}>
-              Search for any patient by ID to retrieve their historical visits, compute longitudinal clinical deltas, and evaluate CVD risk.
-            </p>
           </div>
           <button
             onClick={() => navigate('/new-assessment')}
@@ -92,9 +89,6 @@ export default function Assessment() {
             </div>
             <div>
               <h2 style={{ margin: 0, color: '#1a365d', fontSize: '1.4rem' }}>Search Patient by ID</h2>
-              <p style={{ margin: 0, color: '#718096', fontSize: '0.95rem' }}>
-                Retrieves all historical visits from PostgreSQL, computes chronological features, and predicts using the complete temporal vector.
-              </p>
             </div>
           </div>
 
@@ -173,7 +167,7 @@ export default function Assessment() {
 
           <div style={{ marginTop: '1.5rem', padding: '1rem 1.25rem', backgroundColor: '#f7fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <span style={{ display: 'block', fontSize: '0.9rem', color: '#718096', fontWeight: 700, marginBottom: '0.75rem' }}>
-              Sample Patient IDs from Ingested Dataset:
+              Sample Patient ID
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
               {['P56393', 'P4505', 'P46414', 'P36228', 'P31853', 'P100355'].map((sampleId) => (
@@ -209,7 +203,6 @@ export default function Assessment() {
 
   // Rendering Patient Temporal Profile
   const predictionValue = result.risk_prediction ?? result.prediction?.prediction ?? 0;
-  const probability = result.risk_probability ?? result.prediction?.probability ?? 0;
   const isFirstVisit = result.is_first_visit !== undefined ? result.is_first_visit : ((result.number_of_visits || 1) <= 1);
   const snapshot = result.temporal_snapshot || {};
   const temporal = result.temporal_snapshot || result.temporal_features || {};
@@ -260,46 +253,10 @@ export default function Assessment() {
                 {isHighRisk ? 'Higher Cardiovascular Disease Risk' : 'Lower Cardiovascular Disease Risk'}
               </h2>
             </div>
-            <p style={{ margin: '0.5rem 0 0 0', color: '#4a5568', fontSize: '1.05rem' }}>
-              Assessment calculated using <strong>validated 10 temporal clinical variables</strong> from PostgreSQL.
-            </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-            <div style={{ textAlign: 'center', backgroundColor: '#ffffff', padding: '1rem 1.5rem', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-              <div style={{ fontSize: '0.8rem', color: '#718096', textTransform: 'uppercase', fontWeight: 600 }}>Risk Probability</div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, color: isHighRisk ? '#e53e3e' : '#38a169' }}>
-                {(probability * 100).toFixed(1)}%
-              </div>
-            </div>
-            <div style={{ textAlign: 'center', backgroundColor: '#ffffff', padding: '1rem 1.5rem', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-              <div style={{ fontSize: '0.8rem', color: '#718096', textTransform: 'uppercase', fontWeight: 600 }}>Current Visit</div>
-              <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1a365d' }}>
-                #{result.visit_number}
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Probability Progress Bar */}
-        <div style={{ marginTop: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 600, color: '#718096', marginBottom: '0.4rem' }}>
-            <span>Low Risk (0%)</span>
-            <span>Probability Score: {(probability * 100).toFixed(1)}%</span>
-            <span>High Risk (100%)</span>
-          </div>
-          <div style={{ width: '100%', height: '12px', backgroundColor: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${Math.min(100, Math.max(5, probability * 100))}%`,
-                height: '100%',
-                backgroundColor: isHighRisk ? '#e53e3e' : '#38a169',
-                borderRadius: '9999px',
-                transition: 'width 0.8s ease-in-out',
-              }}
-            />
-          </div>
-        </div>
       </div>
 
       {/* Changes from Immediately Previous Visit Section (Section 2, 3, 25, 26, 27) */}
@@ -379,7 +336,7 @@ export default function Assessment() {
           </div>
         </div>
 
-        {/* Right: 2 Categorical Changes + Visit Summary */}
+        {/* Right: 2 Categorical Changes */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Categorical Variables Card */}
           <div className="card" style={{ padding: '1.75rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
@@ -406,17 +363,6 @@ export default function Assessment() {
             </div>
           </div>
 
-          {/* Longitudinal Summary Card */}
-          <div className="card" style={{ padding: '1.5rem', borderRadius: '12px', backgroundColor: '#f8fbff', border: '1px solid #bee3f8' }}>
-            <h4 style={{ margin: '0 0 0.5rem 0', color: '#2b6cb0', fontSize: '1.05rem' }}>Longitudinal Follow-up Summary</h4>
-            <p style={{ margin: 0, color: '#4a5568', fontSize: '0.9rem', lineHeight: 1.5 }}>
-              {isFirstVisit ? (
-                'This patient currently has 1 recorded visit in PostgreSQL. Baseline measurements are active. Upon recording a second visit, previous measurements and exact delta values (current - previous) will be generated automatically.'
-              ) : (
-                `This patient has ${result.number_of_visits} recorded visits. Temporal comparison is active, referencing the immediately preceding visit (${result.visit_number - 1}).`
-              )}
-            </p>
-          </div>
         </div>
       </div>
 
@@ -527,7 +473,7 @@ function DeltaCard({ label, unit, curr, prev, delta, isFirst }: any) {
       <div style={{ textAlign: 'right' }}>
         {!hasValidDelta ? (
           <span style={{ fontSize: '0.85rem', color: '#718096', fontStyle: 'italic', backgroundColor: '#edf2f7', padding: '0.25rem 0.6rem', borderRadius: '6px' }}>
-            No previous visit available
+            No change
           </span>
         ) : (
           <span style={{ fontWeight: 800, fontSize: '1.05rem', color: deltaVal > 0 ? '#e53e3e' : deltaVal < 0 ? '#38a169' : '#4a5568' }}>
@@ -562,7 +508,7 @@ function CategoricalCard({ label, curr, prev, changed, isFirst }: any) {
       <div style={{ marginTop: '0.45rem' }}>
         {!hasPrev || isChanged === null ? (
           <span style={{ fontSize: '0.8rem', color: '#718096', fontStyle: 'italic', backgroundColor: '#edf2f7', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-            No previous visit available
+            No change
           </span>
         ) : (
           <span style={{ fontSize: '0.82rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '4px', backgroundColor: isChanged ? '#feebc8' : '#e2e8f0', color: isChanged ? '#c05621' : '#4a5568' }}>

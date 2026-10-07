@@ -29,25 +29,61 @@ def _load_json(path: str, default=None):
         return default
 
 
+def _load_csv(path: str, default=None):
+    if not os.path.exists(path):
+        return default if default is not None else []
+    try:
+        return pd.read_csv(path).to_dict(orient="records")
+    except Exception:
+        return default if default is not None else []
+
+
 @router.get("/analytics")
 def get_analytics():
     artifact_dir = MODEL_ARTIFACT_DIR
+    fallback_artifact_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "artifacts")
+    )
     summary = _load_json(os.path.join(artifact_dir, "temporal_pipeline_summary.json"), {})
+    if not summary and fallback_artifact_dir != os.path.abspath(artifact_dir):
+        summary = _load_json(os.path.join(fallback_artifact_dir, "temporal_pipeline_summary.json"), {})
     metrics = _load_json(os.path.join(artifact_dir, "model_metrics.json"), {})
+    if not metrics and fallback_artifact_dir != os.path.abspath(artifact_dir):
+        metrics = _load_json(os.path.join(fallback_artifact_dir, "model_metrics.json"), {})
     roc_data = summary.get("roc", {"fpr": [], "tpr": []})
     confusion_matrix_data = metrics.get("confusion_matrix", summary.get("confusion_matrix", {}))
 
-    comparison_path = os.path.join(artifact_dir, "model_comparison.csv")
-    if os.path.exists(comparison_path):
-        comparison = pd.read_csv(comparison_path).to_dict(orient="records")
-    else:
-        comparison = summary.get("comparison", [])
+    comparison = _load_csv(
+        os.path.join(artifact_dir, "model_comparison.csv"),
+        summary.get("comparison", []),
+    )
 
-    before_after_path = os.path.join(artifact_dir, "before_after_temporal_comparison.csv")
-    if os.path.exists(before_after_path):
-        comparative_analysis = pd.read_csv(before_after_path).to_dict(orient="records")
+    comparative_analysis = _load_csv(
+        os.path.join(artifact_dir, "before_after_temporal_comparison.csv"),
+        summary.get("comparative_analysis", []),
+    )
+    cross_validation_summary = _load_csv(
+        os.path.join(artifact_dir, "cross_validation_summary.csv"),
+        summary.get("before_temporal", {}).get("cross_validation", [])
+        + summary.get("after_temporal", {}).get("cross_validation", []),
+    )
+    cross_validation_folds = _load_csv(
+        os.path.join(artifact_dir, "cross_validation_folds.csv"),
+        [],
+    )
+    cross_validation_comparison = _load_csv(
+        os.path.join(artifact_dir, "before_after_cross_validation_comparison.csv"),
+        summary.get("cross_validation_comparison", []),
+    )
+
+    smote_accuracy_path = os.path.join(artifact_dir, "smote_model_accuracy.json")
+    if os.path.exists(smote_accuracy_path):
+        with open(smote_accuracy_path, "r") as f:
+            smote_model_comparison = json.load(f)
+    elif comparative_analysis:
+        smote_model_comparison = comparative_analysis
     else:
-        comparative_analysis = summary.get("comparative_analysis", [])
+        smote_model_comparison = summary.get("smote_model_comparison", [])
 
     # Fetch live database temporal statistics
     session = get_session()
@@ -100,6 +136,7 @@ def get_analytics():
             "categorical_change_features": CATEGORICAL_CHANGED_FIELDS,
         },
         "smote": smote_data,
+        "smote_model_comparison": smote_model_comparison,
         "smote_analysis": {
             "records_before": smote_data.get("samples_before", 100001),
             "records_after": smote_data.get("samples_after", 140124),
@@ -113,6 +150,9 @@ def get_analytics():
         "before_temporal": before_temporal,
         "after_temporal": after_temporal,
         "comparative_analysis": comparative_analysis,
+        "cross_validation_summary": cross_validation_summary,
+        "cross_validation_folds": cross_validation_folds,
+        "cross_validation_comparison": cross_validation_comparison,
         "comparison": comparison,
         "model_comparison": comparison,
         "best_model": {

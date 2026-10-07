@@ -71,7 +71,7 @@ def tune_model(model, model_name: str, X_train, y_train, cv: int = CV_FOLDS):
         param_grid=param_grid,
         cv=cv,
         scoring="roc_auc",
-        n_jobs=-1,
+        n_jobs=1,
         verbose=0,
         refit=True,
     )

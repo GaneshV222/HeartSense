@@ -60,15 +60,18 @@ from sklearn.ensemble import GradientBoostingClassifier, AdaBoostClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
     precision_score,
     recall_score,
     f1_score,
+    matthews_corrcoef,
     roc_auc_score,
     average_precision_score,
     roc_curve,
     confusion_matrix,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -612,17 +615,8 @@ def build_feature_preprocessor(feature_cols: List[str], df_sample: pd.DataFrame)
     return preprocessor, num_cols, cat_cols
 
 
-def train_model_suite(
-    X_train_res: np.ndarray,
-    y_train_res: pd.Series | np.ndarray,
-    X_test_proc: np.ndarray,
-    y_test: pd.Series | np.ndarray,
-    proc_feature_names: List[str],
-    suite_label: str = "Enhanced"
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Any, Dict[str, float]]:
-    """
-    Train and evaluate the 5 approved models on the prepared train/test arrays.
-    """
+def get_approved_models() -> Dict[str, Any]:
+    """Return the approved model suite used for holdout and cross-fold evaluation."""
     models: Dict[str, Any] = {}
 
     if HAS_XGB:
@@ -660,7 +654,6 @@ def train_model_suite(
             n_jobs=-1,
         )
 
-    # Compact Regularized Deep Learning MLP Neural Network
     models["Compact MLP Neural Network"] = MLPClassifier(
         hidden_layer_sizes=(64, 32),
         activation="relu",
@@ -672,6 +665,134 @@ def train_model_suite(
         max_iter=100,
         random_state=RANDOM_STATE,
     )
+    return models
+
+
+def calculate_classification_metrics(
+    y_true: pd.Series | np.ndarray,
+    y_pred: pd.Series | np.ndarray,
+    y_score: pd.Series | np.ndarray | None = None,
+) -> Dict[str, Any]:
+    """Calculate the full binary evaluation metric set used across the project."""
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = int(cm[0, 0]), int(cm[0, 1]), int(cm[1, 0]), int(cm[1, 1])
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    score = y_score if y_score is not None else y_pred
+
+    try:
+        auc = float(roc_auc_score(y_true, score))
+    except Exception:
+        auc = 0.5
+    try:
+        pr_auc = float(average_precision_score(y_true, score))
+    except Exception:
+        pr_auc = 0.5
+
+    return {
+        "accuracy": round(float(accuracy_score(y_true, y_pred)), 4),
+        "balanced_accuracy": round(float(balanced_accuracy_score(y_true, y_pred)), 4),
+        "precision": round(float(precision_score(y_true, y_pred, average="weighted", zero_division=0)), 4),
+        "recall": round(float(recall_score(y_true, y_pred, average="weighted", zero_division=0)), 4),
+        "specificity": round(float(specificity), 4),
+        "f1": round(float(f1_score(y_true, y_pred, average="weighted", zero_division=0)), 4),
+        "roc_auc": round(float(auc), 4),
+        "pr_auc": round(float(pr_auc), 4),
+        "mcc": round(float(matthews_corrcoef(y_true, y_pred)), 4),
+        "confusion_matrix": {"tn": tn, "fp": fp, "fn": fn, "tp": tp, "matrix": cm.tolist()},
+    }
+
+
+def _predict_scores(model: Any, X_data: np.ndarray) -> np.ndarray:
+    try:
+        return model.predict_proba(X_data)[:, 1]
+    except Exception:
+        try:
+            return model.decision_function(X_data)
+        except Exception:
+            return model.predict(X_data)
+
+
+def cross_validate_model_suite(
+    X_resampled: np.ndarray,
+    y_resampled: pd.Series | np.ndarray,
+    suite_label: str,
+    folds: int = 5,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Run stratified 5-fold validation and return summary rows plus per-fold metrics."""
+    models = get_approved_models()
+    y_array = np.asarray(y_resampled)
+    cv = StratifiedKFold(n_splits=folds, shuffle=True, random_state=RANDOM_STATE)
+    metric_names = [
+        "accuracy",
+        "balanced_accuracy",
+        "precision",
+        "recall",
+        "specificity",
+        "f1",
+        "roc_auc",
+        "pr_auc",
+        "mcc",
+    ]
+    fold_rows: List[Dict[str, Any]] = []
+    summary_rows: List[Dict[str, Any]] = []
+
+    print(f"\n[Validation] Running {folds}-fold validation for {suite_label}...")
+    for name, model in models.items():
+        per_model_metrics: Dict[str, List[float]] = {m: [] for m in metric_names}
+        for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X_resampled, y_array), start=1):
+            fold_model = clone(model)
+            fold_model.fit(X_resampled[train_idx], y_array[train_idx])
+            pred = fold_model.predict(X_resampled[val_idx])
+            score = _predict_scores(fold_model, X_resampled[val_idx])
+            metrics = calculate_classification_metrics(y_array[val_idx], pred, score)
+
+            for metric_name in metric_names:
+                per_model_metrics[metric_name].append(float(metrics[metric_name]))
+
+            fold_rows.append({
+                "suite": suite_label,
+                "model_name": name,
+                "fold": fold_idx,
+                **{m: metrics[m] for m in metric_names},
+                "confusion_matrix": metrics["confusion_matrix"],
+            })
+
+        summary = {
+            "suite": suite_label,
+            "model_name": name,
+            "model_type": "Deep Learning" if "MLP" in name else "ML Ensemble",
+            "folds": folds,
+        }
+        for metric_name in metric_names:
+            values = per_model_metrics[metric_name]
+            summary[f"{metric_name}_mean"] = round(float(np.mean(values)), 4)
+            summary[f"{metric_name}_std"] = round(float(np.std(values)), 4)
+            summary[f"{metric_name}_min"] = round(float(np.min(values)), 4)
+            summary[f"{metric_name}_max"] = round(float(np.max(values)), 4)
+        summary["meets_95_accuracy_target"] = bool(summary["accuracy_mean"] >= 0.95)
+        summary_rows.append(summary)
+        print(
+            f"  * [{suite_label}] {name:<26}: "
+            f"CV Acc={summary['accuracy_mean']*100:.2f}% +/- {summary['accuracy_std']*100:.2f}% | "
+            f"F1={summary['f1_mean']*100:.2f}% | ROC-AUC={summary['roc_auc_mean']:.4f}"
+        )
+
+    summary_rows.sort(key=lambda r: (r["roc_auc_mean"], r["f1_mean"], r["accuracy_mean"]), reverse=True)
+    return summary_rows, fold_rows
+
+
+def train_model_suite(
+    X_train_res: np.ndarray,
+    y_train_res: pd.Series | np.ndarray,
+    X_test_proc: np.ndarray,
+    y_test: pd.Series | np.ndarray,
+    proc_feature_names: List[str],
+    suite_label: str = "Enhanced"
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Any, Dict[str, float]]:
+    """
+    Train and evaluate the 5 approved models on the prepared train/test arrays.
+    """
+    models = get_approved_models()
 
     comparison_rows = []
     trained_models = {}
@@ -686,43 +807,17 @@ def train_model_suite(
 
         # Evaluate on test set
         pred = model.predict(X_test_proc)
-        try:
-            proba = model.predict_proba(X_test_proc)[:, 1]
-        except Exception:
-            proba = pred
-
-        acc = float(accuracy_score(y_test, pred))
-        prec = float(precision_score(y_test, pred, average="weighted", zero_division=0))
-        rec = float(recall_score(y_test, pred, average="weighted", zero_division=0))
-        f1 = float(f1_score(y_test, pred, average="weighted", zero_division=0))
-        try:
-            auc = float(roc_auc_score(y_test, proba))
-        except Exception:
-            auc = 0.5
-        try:
-            pr_auc = float(average_precision_score(y_test, proba))
-        except Exception:
-            pr_auc = 0.5
-
-        cm = confusion_matrix(y_test, pred)
-        tn, fp, fn, tp = int(cm[0, 0]), int(cm[0, 1]), int(cm[1, 0]), int(cm[1, 1])
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        proba = _predict_scores(model, X_test_proc)
+        metrics = calculate_classification_metrics(y_test, pred, proba)
 
         row = {
             "model_name": name,
             "model_type": "Deep Learning" if "MLP" in name else "ML Ensemble",
-            "accuracy": round(acc, 4),
-            "precision": round(prec, 4),
-            "recall": round(rec, 4),
-            "specificity": round(specificity, 4),
-            "f1": round(f1, 4),
-            "roc_auc": round(auc, 4),
-            "pr_auc": round(pr_auc, 4),
-            "confusion_matrix": {"tn": tn, "fp": fp, "fn": fn, "tp": tp, "matrix": cm.tolist()},
+            **metrics,
             "training_time_seconds": train_time,
         }
         comparison_rows.append(row)
-        print(f"  • [{suite_label}] {name:<26}: Acc={acc*100:.2f}% | F1={f1*100:.2f}% | ROC-AUC={auc:.4f} | PR-AUC={pr_auc:.4f} ({train_time}s)")
+        print(f"  * [{suite_label}] {name:<26}: Acc={metrics['accuracy']*100:.2f}% | F1={metrics['f1']*100:.2f}% | ROC-AUC={metrics['roc_auc']:.4f} | PR-AUC={metrics['pr_auc']:.4f} ({train_time}s)")
 
         # Feature importances from tree-based models
         if name in {"XGBoost", "Gradient Boosting", "LightGBM"} and not feature_importances:
@@ -778,6 +873,9 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     # SMOTE applied before split on full baseline dataset
     smote_base = SMOTE(random_state=RANDOM_STATE)
     X_base_res, y_base_res = smote_base.fit_resample(X_base_proc, y_all)
+    base_cv_summary, base_cv_folds = cross_validate_model_suite(
+        X_base_res, y_base_res, suite_label="Baseline (Before Temporal)", folds=5
+    )
 
     X_base_tr, X_base_te, y_base_tr, y_base_te = train_test_split(
         X_base_res, y_base_res, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y_base_res
@@ -804,6 +902,9 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     smote_temp = SMOTE(random_state=RANDOM_STATE)
     X_temp_res, y_temp_res = smote_temp.fit_resample(X_temp_proc, y_all)
     smote_after_dist = {int(k): int(v) for k, v in pd.Series(y_temp_res).value_counts().items()}
+    temp_cv_summary, temp_cv_folds = cross_validate_model_suite(
+        X_temp_res, y_temp_res, suite_label="Enhanced (After Temporal)", folds=5
+    )
 
     smote_info = {
         "before": smote_before_dist,
@@ -827,6 +928,45 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     # -------------------------------------------------------------
     comparative_analysis = []
     base_map = {r["model_name"]: r for r in base_comparison}
+    base_cv_map = {r["model_name"]: r for r in base_cv_summary}
+    cross_validation_comparison = []
+    for temp_cv_row in temp_cv_summary:
+        mname = temp_cv_row["model_name"]
+        base_cv_row = base_cv_map.get(mname, temp_cv_row)
+        cv_acc_lift = round(temp_cv_row["accuracy_mean"] - base_cv_row["accuracy_mean"], 4)
+        cv_f1_lift = round(temp_cv_row["f1_mean"] - base_cv_row["f1_mean"], 4)
+        cv_auc_lift = round(temp_cv_row["roc_auc_mean"] - base_cv_row["roc_auc_mean"], 4)
+        cv_recall_lift = round(temp_cv_row["recall_mean"] - base_cv_row["recall_mean"], 4)
+        cv_balanced_lift = round(temp_cv_row["balanced_accuracy_mean"] - base_cv_row["balanced_accuracy_mean"], 4)
+        cv_mcc_lift = round(temp_cv_row["mcc_mean"] - base_cv_row["mcc_mean"], 4)
+        cross_validation_comparison.append({
+            "model_name": mname,
+            "model_type": temp_cv_row["model_type"],
+            "folds": temp_cv_row["folds"],
+            "before_accuracy_mean": base_cv_row["accuracy_mean"],
+            "before_accuracy_std": base_cv_row["accuracy_std"],
+            "after_accuracy_mean": temp_cv_row["accuracy_mean"],
+            "after_accuracy_std": temp_cv_row["accuracy_std"],
+            "accuracy_lift": cv_acc_lift,
+            "accuracy_lift_pct": f"{cv_acc_lift * 100:+.2f}%",
+            "before_f1_mean": base_cv_row["f1_mean"],
+            "after_f1_mean": temp_cv_row["f1_mean"],
+            "f1_lift": cv_f1_lift,
+            "before_roc_auc_mean": base_cv_row["roc_auc_mean"],
+            "after_roc_auc_mean": temp_cv_row["roc_auc_mean"],
+            "roc_auc_lift": cv_auc_lift,
+            "before_recall_mean": base_cv_row["recall_mean"],
+            "after_recall_mean": temp_cv_row["recall_mean"],
+            "recall_lift": cv_recall_lift,
+            "before_balanced_accuracy_mean": base_cv_row["balanced_accuracy_mean"],
+            "after_balanced_accuracy_mean": temp_cv_row["balanced_accuracy_mean"],
+            "balanced_accuracy_lift": cv_balanced_lift,
+            "before_mcc_mean": base_cv_row["mcc_mean"],
+            "after_mcc_mean": temp_cv_row["mcc_mean"],
+            "mcc_lift": cv_mcc_lift,
+            "after_meets_95_accuracy_target": temp_cv_row["meets_95_accuracy_target"],
+        })
+
     for temp_row in temp_comparison:
         mname = temp_row["model_name"]
         b_row = base_map.get(mname, temp_row)
@@ -890,6 +1030,15 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
 
     pd.DataFrame(temp_comparison).to_csv(os.path.join(MODEL_ARTIFACT_DIR, "model_comparison.csv"), index=False)
     pd.DataFrame(comparative_analysis).to_csv(os.path.join(MODEL_ARTIFACT_DIR, "before_after_temporal_comparison.csv"), index=False)
+    pd.DataFrame(base_cv_summary + temp_cv_summary).to_csv(
+        os.path.join(MODEL_ARTIFACT_DIR, "cross_validation_summary.csv"), index=False
+    )
+    pd.DataFrame(base_cv_folds + temp_cv_folds).to_csv(
+        os.path.join(MODEL_ARTIFACT_DIR, "cross_validation_folds.csv"), index=False
+    )
+    pd.DataFrame(cross_validation_comparison).to_csv(
+        os.path.join(MODEL_ARTIFACT_DIR, "before_after_cross_validation_comparison.csv"), index=False
+    )
 
     summary = {
         "preprocessing": prep_report,
@@ -926,14 +1075,17 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
         "before_temporal": {
             "models": base_comparison,
             "best_model": base_best_row,
+            "cross_validation": base_cv_summary,
             "features_used": len(BASELINE_FEATURE_COLS),
         },
         "after_temporal": {
             "models": temp_comparison,
             "best_model": temp_best_row,
+            "cross_validation": temp_cv_summary,
             "features_used": len(model_features),
         },
         "comparative_analysis": comparative_analysis,
+        "cross_validation_comparison": cross_validation_comparison,
         "comparison": temp_comparison,
         "best_model": temp_best_row,
         "best_name": temp_best_row["model_name"],

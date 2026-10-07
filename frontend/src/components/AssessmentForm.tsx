@@ -44,7 +44,6 @@ export default function AssessmentForm() {
   return (
     <div className="card">
       <h2 style={{ marginTop: 0, color: '#1a365d' }}>New Patient / New Visit</h2>
-      <p style={{ color: '#718096', marginBottom: '1.5rem' }}>Store this visit and predict using current + temporal features.</p>
       {error && <div style={{ backgroundColor: '#fed7d7', color: '#c53030', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>{error}</div>}
       <form onSubmit={handleSubmit}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -60,7 +59,6 @@ export default function AssessmentForm() {
               placeholder="e.g. P4505 or P001"
               autoComplete="off"
             />
-            <small style={{ color: '#718096', display: 'block', marginTop: '0.35rem' }}>Use a clean alphanumeric ID (e.g. P4505); spaces and prefixes are stripped automatically.</small>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}><label>Name</label><input type="text" className="input-field" name="patientName" value={formData.patientName} onChange={handleChange} placeholder="optional" /></div>
         </div>

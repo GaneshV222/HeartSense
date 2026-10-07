@@ -21,8 +21,11 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_curve, confusion_matrix
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
@@ -43,6 +46,7 @@ from app.ml.feature_selection import select_features, save_feature_artifacts
 from app.ml.tuning import tune_model
 from app.ml.evaluation import (
     evaluate_all_models,
+    evaluate_model,
     select_best_model,
     save_metrics,
 )
@@ -53,11 +57,20 @@ from app.ml.evaluation import (
 def get_base_models() -> dict:
     """Return a dict of model_name → untrained estimator."""
     return {
-        "Logistic Regression": LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
-        "Random Forest": RandomForestClassifier(random_state=RANDOM_STATE),
-        "Decision Tree": DecisionTreeClassifier(random_state=RANDOM_STATE),
-        "SVM": SVC(random_state=RANDOM_STATE, probability=True),
-        "KNN": KNeighborsClassifier(),
+        "Logistic Regression": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000, class_weight="balanced")),
+        ]),
+        "Random Forest": RandomForestClassifier(random_state=RANDOM_STATE, class_weight="balanced"),
+        "Decision Tree": DecisionTreeClassifier(random_state=RANDOM_STATE, class_weight="balanced"),
+        "SVM": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", SVC(random_state=RANDOM_STATE, probability=True, class_weight="balanced")),
+        ]),
+        "KNN": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", KNeighborsClassifier()),
+        ]),
         "Naive Bayes": GaussianNB(),
     }
 
@@ -86,6 +99,10 @@ def run_training_pipeline(dataset_path: str | None = None) -> dict:
     X, y = separate_features_target(df_clean)
     print(f"[Pipeline] Features shape: {X.shape}, Target shape: {y.shape}")
 
+    # Keep the unsampled feature space for a clean before/after SMOTE accuracy comparison.
+    X_before_smt = X.copy()
+    y_before_smt = y.copy()
+
     # ── 3. SMOTE (BEFORE split) ────────────────────────────────────────────────
     X_smote, y_smote, smote_info = apply_smote(X, y)
 
@@ -93,9 +110,22 @@ def run_training_pipeline(dataset_path: str | None = None) -> dict:
     X_selected, selector, feature_info = select_features(X_smote, y_smote, k=FEATURE_SELECTION_K)
     save_feature_artifacts(selector, feature_info, artifact_dir)
 
+    # Apply the same selector to the original encoded data to compare the same feature set before/after SMOTE.
+    X_before_prepared = X_before_smt.copy()
+    if isinstance(X_before_prepared, pd.DataFrame):
+        non_numeric = list(X_before_prepared.select_dtypes(exclude=[np.number]).columns)
+        if non_numeric:
+            X_before_prepared = pd.get_dummies(X_before_prepared, columns=non_numeric, dtype=float)
+        X_before_prepared = X_before_prepared.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    X_before_selected = selector.transform(X_before_prepared)
+    X_before_selected = pd.DataFrame(X_before_selected, columns=X_selected.columns)
+
     # ── 5. Train-Test Split ────────────────────────────────────────────────────
     X_train, X_test, y_train, y_test = train_test_split(
         X_selected, y_smote, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y_smote
+    )
+    X_before_train, X_before_test, y_before_train, y_before_test = train_test_split(
+        X_before_selected, y_before_smt, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y_before_smt
     )
     split_info = {
         "train_size": len(X_train),
@@ -133,6 +163,40 @@ def run_training_pipeline(dataset_path: str | None = None) -> dict:
 
     # ── 8. Select best model ───────────────────────────────────────────────────
     best_name, best_estimator, best_metrics = select_best_model(comparison_df, trained_models)
+
+    # Compare model performance before vs after SMOTE without altering the normal pipeline.
+    smote_model_comparison = []
+    for model_name, model in trained_models.items():
+        before_model = clone(model)
+        before_model.fit(X_before_train, y_before_train)
+        before_metrics = evaluate_model(before_model, X_before_test, y_before_test, model_name=model_name)
+        after_metrics = evaluate_model(model, X_test, y_test, model_name=model_name)
+
+        accuracy_lift = float(after_metrics["accuracy"]) - float(before_metrics["accuracy"])
+        f1_lift = float(after_metrics["f1"]) - float(before_metrics["f1"])
+        roc_auc_lift = float(after_metrics["roc_auc"]) - float(before_metrics["roc_auc"])
+        smote_model_comparison.append({
+            "model_name": model_name,
+            "before_accuracy": round(before_metrics["accuracy"], 4),
+            "after_accuracy": round(after_metrics["accuracy"], 4),
+            "accuracy_lift": round(accuracy_lift, 4),
+            "accuracy_lift_pct": f"{accuracy_lift * 100:+.2f}%",
+            "before_f1": round(before_metrics["f1"], 4),
+            "after_f1": round(after_metrics["f1"], 4),
+            "f1_lift": round(f1_lift, 4),
+            "f1_lift_pct": f"{f1_lift * 100:+.2f}%",
+            "before_roc_auc": round(before_metrics["roc_auc"], 4),
+            "after_roc_auc": round(after_metrics["roc_auc"], 4),
+            "roc_auc_lift": round(roc_auc_lift, 4),
+            "roc_auc_lift_val": f"{roc_auc_lift:+.4f}",
+            "before_recall": round(before_metrics["recall"], 4),
+            "after_recall": round(after_metrics["recall"], 4),
+            "recall_lift": round(float(after_metrics["recall"]) - float(before_metrics["recall"]), 4),
+            "clinical_impact": "Positive SMOTE gain" if accuracy_lift >= 0 else "Requires review",
+        })
+
+    with open(os.path.join(artifact_dir, "smote_model_accuracy.json"), "w") as f:
+        json.dump(smote_model_comparison, f, indent=2)
 
     # ── 9. Save artifacts ──────────────────────────────────────────────────────
     joblib.dump(best_estimator, os.path.join(artifact_dir, "best_model.joblib"))
@@ -206,6 +270,7 @@ def run_training_pipeline(dataset_path: str | None = None) -> dict:
     return {
         "dataset_info": dataset_info,
         "smote_info": smote_info,
+        "smote_model_comparison": smote_model_comparison,
         "feature_info": feature_info,
         "split_info": split_info,
         "tuning_results": tuning_results,
