@@ -1109,15 +1109,25 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
     print("\nTRAINING COMPLETE & ALL DUAL PIPELINE ARTIFACTS SAVED SUCCESSFULLY!")
     return summary
 
-
 def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
     """
-    Predict CVD risk for a patient using their latest visit and genuine preceding visit.
-    Uses temporal_patient_data and patient_visits from PostgreSQL.
+    Predict CVD risk for a patient using:
+      - Latest/current visit details from patient_visits
+      - Already-calculated temporal features from temporal_patient_data
+
+    Temporal features are NOT recalculated here.
+    They are directly taken from temporal_patient_data.
     """
-    artifact_path = os.path.join(MODEL_ARTIFACT_DIR, "temporal_model_artifact.joblib")
+
+    artifact_path = os.path.join(
+        MODEL_ARTIFACT_DIR,
+        "temporal_model_artifact.joblib"
+    )
+
     if not os.path.exists(artifact_path):
-        raise FileNotFoundError("Model artifact not found. Please train the model first.")
+        raise FileNotFoundError(
+            "Model artifact not found. Please train the model first."
+        )
 
     artifact = joblib.load(artifact_path)
     model = artifact["model"]
@@ -1125,157 +1135,354 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
     feature_cols = artifact["feature_columns"]
 
     session = get_session()
+
     try:
+        # =====================================================
+        # 1. GET LATEST VISIT FROM patient_visits
+        # =====================================================
         visits_query = text("""
-            SELECT * FROM patient_visits
+            SELECT *
+            FROM patient_visits
             WHERE patient_id = :pid
             ORDER BY visit_date ASC, id ASC
         """)
-        rows = session.execute(visits_query, {"pid": str(patient_id)}).mappings().all()
+
+        rows = session.execute(
+            visits_query,
+            {"pid": str(patient_id)}
+        ).mappings().all()
+
         if not rows:
-            raise ValueError(f"No patient visits found for patient_id: '{patient_id}'")
+            raise ValueError(
+                f"No patient visits found for patient_id: '{patient_id}'"
+            )
 
         visits = [dict(r) for r in rows]
-        latest_visit = visits[-1]
-        previous_visit = visits[-2] if len(visits) > 1 else None
 
-        snapshot = TemporalFeatureService.calculate_snapshot(
-            current_data=latest_visit,
-            previous_data=previous_visit,
-            patient_id=str(patient_id),
-            current_visit_id=latest_visit.get("id"),
-            previous_visit_id=previous_visit.get("id") if previous_visit else None,
-            current_visit_date=latest_visit.get("visit_date"),
-            previous_visit_date=previous_visit.get("visit_date") if previous_visit else None,
-        )
+        latest_visit = visits[-1]
+
+        # =====================================================
+        # 2. GET TEMPORAL DATA
+        # =====================================================
+        temporal_query = text("""
+            SELECT *
+            FROM temporal_patient_data
+            WHERE patient_id = :pid
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+
+        temporal_row = session.execute(
+            temporal_query,
+            {"pid": str(patient_id)}
+        ).mappings().first()
+
+        if not temporal_row:
+            raise ValueError(
+                f"No temporal data found for patient_id: '{patient_id}'"
+            )
+
+        temporal_data = dict(temporal_row)
+
 
         num_cols = artifact.get("num_cols", [])
         cat_cols = artifact.get("cat_cols", [])
 
         row_dict = {}
+
         for c in feature_cols:
+
             val = None
-            if c in latest_visit:
+
+            if c in temporal_data:
+                val = temporal_data[c]
+
+            elif c in latest_visit:
                 val = latest_visit[c]
-            elif c in snapshot:
-                val = snapshot[c]
-            elif c.startswith("prev_") and c in snapshot:
-                val = snapshot[c]
-            elif c.endswith("_change") and c in snapshot:
-                val = snapshot[c]
-            elif c.endswith("_rate") and c in snapshot:
-                val = snapshot[c]
-            elif c.endswith("_changed") and c in snapshot:
-                val = snapshot[c]
 
             if c in num_cols:
+
                 if isinstance(val, bool):
                     row_dict[c] = 1.0 if val else 0.0
+
                 elif isinstance(val, str):
+
                     v_low = val.strip().lower()
-                    if v_low in {"no", "n", "false", "0"}:
+
+                    if v_low in {
+                        "no",
+                        "n",
+                        "false",
+                        "0"
+                    }:
                         row_dict[c] = 0.0
-                    elif v_low in {"yes", "y", "true", "1"}:
+
+                    elif v_low in {
+                        "yes",
+                        "y",
+                        "true",
+                        "1"
+                    }:
                         row_dict[c] = 1.0
+
                     else:
                         try:
                             row_dict[c] = float(val)
                         except Exception:
                             row_dict[c] = np.nan
+
                 else:
                     try:
-                        row_dict[c] = float(val) if val is not None else np.nan
+                        row_dict[c] = (
+                            float(val)
+                            if val is not None
+                            else np.nan
+                        )
                     except Exception:
                         row_dict[c] = np.nan
+
             else:
-                row_dict[c] = str(val) if (val is not None and str(val) != "nan") else "missing"
+                row_dict[c] = (
+                    str(val)
+                    if val is not None and str(val) != "nan"
+                    else "missing"
+                )
+
 
         pred_df = pd.DataFrame([row_dict])
+
         for c in num_cols:
             if c in pred_df.columns:
-                pred_df[c] = pd.to_numeric(pred_df[c], errors="coerce")
+                pred_df[c] = pd.to_numeric(
+                    pred_df[c],
+                    errors="coerce"
+                )
+
         for c in cat_cols:
             if c in pred_df.columns:
                 pred_df[c] = pred_df[c].astype(str)
 
+
         proc_data = preprocessor.transform(pred_df)
 
-        prediction_label = int(model.predict(proc_data)[0])
-        try:
-            probabilities = model.predict_proba(proc_data)[0].tolist()
-            risk_score = round(float(probabilities[1]), 4)
-        except Exception:
-            risk_score = 1.0 if prediction_label == 1 else 0.0
+        prediction_label = int(
+            model.predict(proc_data)[0]
+        )
 
-        risk_category = "High Risk" if prediction_label == 1 or risk_score >= 0.5 else "Low Risk"
+        try:
+            probabilities = model.predict_proba(
+                proc_data
+            )[0].tolist()
+
+            risk_score = round(
+                float(probabilities[1]),
+                4
+            )
+
+        except Exception:
+            risk_score = (
+                1.0
+                if prediction_label == 1
+                else 0.0
+            )
+
+
+        risk_category = (
+            "High Risk"
+            if prediction_label == 1 or risk_score >= 0.5
+            else "Low Risk"
+        )
+
+
+        temporal_features = {}
+
+        for v in ALL_10_TEMPORAL_VARIABLES:
+
+            if v in temporal_data:
+                temporal_features[v] = temporal_data[v]
+
+            else:
+                temporal_features[v] = None
+
 
         num_details = []
+
         for v in CRITICAL_NUMERICAL_FEATURES:
-            cur_v = snapshot.get(f"current_{v}")
-            prev_v = snapshot.get(f"previous_{v}")
-            change_v = snapshot.get(f"{v}_change")
-            rate_v = snapshot.get(f"{v}_rate")
-            unit = VARIABLE_METADATA.get(v, {}).get("unit", "")
-            lbl = VARIABLE_METADATA.get(v, {}).get("label", v)
+
+            current_value = temporal_data.get(
+                f"current_{v}",
+                temporal_data.get(v)
+            )
+
+            previous_value = temporal_data.get(
+                f"previous_{v}"
+            )
+
+            change_value = temporal_data.get(
+                f"{v}_change"
+            )
+
+            rate_value = temporal_data.get(
+                f"{v}_rate"
+            )
+
+            unit = VARIABLE_METADATA.get(
+                v,
+                {}
+            ).get("unit", "")
+
+            lbl = VARIABLE_METADATA.get(
+                v,
+                {}
+            ).get("label", v)
+
             num_details.append({
                 "feature": v,
                 "label": lbl,
                 "unit": unit,
-                "current": cur_v,
-                "previous": prev_v,
-                "change": change_v,
-                "delta": change_v,
-                "rate": rate_v,
-                "status": "No previous visit available" if prev_v is None else (f"+{change_v}" if change_v is not None and change_v > 0 else str(change_v)),
+                "current": current_value,
+                "previous": previous_value,
+                "change": change_value,
+                "delta": change_value,
+                "rate": rate_value,
+
+                "status": (
+                    "No previous visit available"
+                    if previous_value is None
+                    else (
+                        f"+{change_value}"
+                        if change_value is not None
+                        and change_value > 0
+                        else str(change_value)
+                    )
+                ),
             })
 
+        # =====================================================
+        # 10. CATEGORICAL DETAILS
+        #
+        # DIRECTLY FROM temporal_patient_data
+        # =====================================================
+
         cat_details = []
+
         for v in CRITICAL_LIFESTYLE_FEATURES:
-            cur_v = snapshot.get(f"current_{v}")
-            prev_v = snapshot.get(f"previous_{v}")
-            changed_v = snapshot.get(f"{v}_changed")
-            lbl = VARIABLE_METADATA.get(v, {}).get("label", v)
+
+            current_value = temporal_data.get(
+                f"current_{v}",
+                temporal_data.get(v)
+            )
+
+            previous_value = temporal_data.get(
+                f"previous_{v}"
+            )
+
+            changed_value = temporal_data.get(
+                f"{v}_changed"
+            )
+
+            lbl = VARIABLE_METADATA.get(
+                v,
+                {}
+            ).get("label", v)
+
             cat_details.append({
                 "feature": v,
                 "label": lbl,
-                "current": cur_v,
-                "previous": prev_v,
-                "changed": changed_v,
-                "status": "No previous visit available" if prev_v is None else ("Changed" if changed_v else "Unchanged"),
+                "current": current_value,
+                "previous": previous_value,
+                "changed": changed_value,
+
+                "status": (
+                    "No previous visit available"
+                    if previous_value is None
+                    else (
+                        "Changed"
+                        if changed_value
+                        else "Unchanged"
+                    )
+                ),
             })
 
-        timeline = TemporalFeatureService.get_patient_temporal_timeline(session, str(patient_id))
+
+        timeline = (
+            TemporalFeatureService
+            .get_patient_temporal_timeline(
+                session,
+                str(patient_id)
+            )
+        )
+
 
         return {
             "patient_id": str(patient_id),
+
             "patient_code": str(patient_id),
+
             "prediction": {
                 "prediction": prediction_label,
                 "probability": risk_score,
                 "risk_category": risk_category,
                 "model_name": artifact["model_name"],
             },
+
             "risk_prediction": prediction_label,
+
             "risk_probability": risk_score,
+
             "risk_category": risk_category,
-            "assessment_date": str(latest_visit.get("visit_date", datetime.utcnow())),
+
+            "assessment_date": str(
+                latest_visit.get(
+                    "visit_date",
+                    datetime.utcnow()
+                )
+            ),
+
             "model_name": artifact["model_name"],
-            "temporal_snapshot": snapshot,
+
+            # Already calculated temporal data
+            "temporal_data": temporal_data,
+
             "temporal_features": {
                 "numerical": num_details,
                 "categorical": cat_details,
             },
-            "current_values": {v: snapshot.get(f"current_{v}") for v in ALL_10_TEMPORAL_VARIABLES},
-            "previous_values": {v: snapshot.get(f"previous_{v}") for v in ALL_10_TEMPORAL_VARIABLES},
-            "has_previous_visit": previous_visit is not None,
-            "is_first_visit": previous_visit is None,
+
+            "current_values": {
+                v: temporal_data.get(
+                    f"current_{v}",
+                    temporal_data.get(v)
+                )
+                for v in ALL_10_TEMPORAL_VARIABLES
+            },
+
+            "previous_values": {
+                v: temporal_data.get(
+                    f"previous_{v}"
+                )
+                for v in ALL_10_TEMPORAL_VARIABLES
+            },
+
+            "has_previous_visit": (
+                temporal_data.get("previous_visit_id")
+                is not None
+            ),
+
+            "is_first_visit": (
+                temporal_data.get("previous_visit_id")
+                is None
+            ),
+
             "number_of_visits": len(visits),
+
             "visit_number": len(visits),
+
             "timeline": timeline,
         }
+
     finally:
         session.close()
-
 
 def insert_manual_visit(
     patient_id: str,
@@ -1357,7 +1564,7 @@ def insert_manual_visit(
         session.close()
 
 
-# Compatibility helpers
+
 def load_visits_from_db(): pass
 def load_mapping(): return {}
 def generate_temporal_features(df): return df

@@ -477,7 +477,7 @@ function DeltaCard({ label, unit, curr, prev, delta, isFirst }: any) {
           </span>
         ) : (
           <span style={{ fontWeight: 800, fontSize: '1.05rem', color: deltaVal > 0 ? '#e53e3e' : deltaVal < 0 ? '#38a169' : '#4a5568' }}>
-            Δ {deltaVal > 0 ? `+${deltaVal.toFixed(1)}` : deltaVal.toFixed(1)} {unit}
+            {deltaVal > 0 ? `+${deltaVal.toFixed(1)}` : deltaVal.toFixed(1)} {unit}
           </span>
         )}
       </div>
