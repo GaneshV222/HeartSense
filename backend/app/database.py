@@ -55,6 +55,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id ON temporal_patient_data (patient_id);
             CREATE INDEX IF NOT EXISTS ix_predictions_patient_id ON predictions (patient_id);
         """))
+        # Idempotent migration: add is_synthetic column if it doesn't yet exist
+        conn.execute(text("""
+            ALTER TABLE patient_visits
+                ADD COLUMN IF NOT EXISTS is_synthetic BOOLEAN NOT NULL DEFAULT FALSE;
+        """))
 
     print("[Database] PostgreSQL tables created and verified successfully.")
 

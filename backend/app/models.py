@@ -104,6 +104,7 @@ class PatientVisit(Base):
     stress_level = Column(Float, nullable=True)
 
     prediction = Column(Integer, nullable=True)  # 0 or 1 dataset target
+    is_synthetic = Column(Boolean, nullable=False, default=False)  # True for SMOTE-generated rows
     raw_data = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
