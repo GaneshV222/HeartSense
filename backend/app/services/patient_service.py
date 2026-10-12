@@ -32,6 +32,7 @@ def create_patient(
 
     patient = Patient(
         patient_id=str(patient_id),
+        patient_code=str(patient_id),
         name=name,
         gender=gender,
         age=age,
@@ -71,6 +72,23 @@ def create_visit(
     """
     valid_cols = {c.name for c in PatientVisit.__table__.columns if c.name not in {"id", "created_at", "updated_at"}}
     kwargs = {k: v for k, v in clinical_values.items() if k in valid_cols}
+
+    legacy_aliases = {
+        "sex": ("gender", lambda v: "Male" if v in (1, "1", "male", "M") else "Female" if v in (0, "0", "female", "F") else v),
+        "cp": ("chest_pain_type", lambda v: {0: "Typical Angina", 1: "Atypical Angina", 2: "Non-anginal Pain", 3: "Asymptomatic"}.get(v, v)),
+        "trestbps": ("systolic_bp", lambda v: v),
+        "chol": ("cholesterol", lambda v: v),
+        "fbs": ("fasting_blood_sugar", lambda v: "true" if bool(v) else "false"),
+        "restecg": ("resting_ecg", lambda v: {0: "Normal", 1: "ST-T Wave Abnormality", 2: "Left Ventricular Hypertrophy"}.get(v, v)),
+        "thalach": ("max_heart_rate", lambda v: v),
+        "exang": ("exercise_angina", lambda v: "true" if bool(v) else "false"),
+        "slope": ("st_slope", lambda v: {1: "Up", 2: "Flat", 3: "Down"}.get(v, v)),
+        "ca": ("num_major_vessels", lambda v: v),
+        "thal": ("thalassemia", lambda v: {1: "Normal", 2: "Fixed Defect", 3: "Reversible Defect"}.get(v, v)),
+    }
+    for legacy_key, (canonical_key, converter) in legacy_aliases.items():
+        if legacy_key in clinical_values and canonical_key not in kwargs:
+            kwargs[canonical_key] = converter(clinical_values[legacy_key])
 
     if visit_number is None:
         count = session.query(PatientVisit).filter_by(patient_id=str(patient_id)).count()

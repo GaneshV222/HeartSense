@@ -1,4 +1,4 @@
-"""
+﻿"""
 HeartSense Configuration Module
 
 Centralizes all application settings using environment variables.
@@ -23,6 +23,10 @@ for env_path in [
 
 # Paths
 DATASET_PATH = os.getenv("DATASET_PATH", str(BASE_DIR / "data" / "heart_disease_prediction_2026.csv"))
+TEMPORAL_DATASET_PATH = os.getenv(
+    "TEMPORAL_DATASET_PATH",
+    str(BASE_DIR / "data" / "temporal_dataset.xlsx"),
+)
 if not os.path.exists(DATASET_PATH):
     for candidate in [
         BASE_DIR / "data" / "heart_disease_prediction_2026.csv",
@@ -33,7 +37,12 @@ if not os.path.exists(DATASET_PATH):
             DATASET_PATH = str(candidate)
             break
 
-MODEL_ARTIFACT_DIR = os.getenv("MODEL_ARTIFACT_DIR", str(BASE_DIR / "artifacts"))
+_model_artifact_dir = Path(
+    os.getenv("MODEL_ARTIFACT_DIR", str(BASE_DIR / "artifacts"))
+).expanduser()
+if not _model_artifact_dir.is_absolute():
+    _model_artifact_dir = BASE_DIR / _model_artifact_dir
+MODEL_ARTIFACT_DIR = str(_model_artifact_dir.resolve())
 if not os.path.exists(MODEL_ARTIFACT_DIR):
     os.makedirs(MODEL_ARTIFACT_DIR, exist_ok=True)
 
@@ -49,6 +58,40 @@ RANDOM_STATE = 42
 CV_FOLDS = 5
 SMOTE_RANDOM_STATE = 42
 FEATURE_SELECTION_K = "all"
+
+# Compatibility aliases used by legacy tests and older UI code
+FEATURE_NAMES = [
+    "age",
+    "sex",
+    "cp",
+    "trestbps",
+    "chol",
+    "fbs",
+    "restecg",
+    "thalach",
+    "exang",
+    "oldpeak",
+    "slope",
+    "ca",
+    "thal",
+]
+FEATURE_LABELS = {
+    "age": "Age",
+    "sex": "Sex",
+    "cp": "Chest Pain Type",
+    "trestbps": "Resting Blood Pressure (mm Hg)",
+    "chol": "Cholesterol (mg/dl)",
+    "fbs": "Fasting Blood Sugar > 120 mg/dl",
+    "restecg": "Resting ECG",
+    "thalach": "Max Heart Rate",
+    "exang": "Exercise Induced Angina",
+    "oldpeak": "ST Depression",
+    "slope": "Slope of Peak Exercise ST",
+    "ca": "Major Vessels Colored",
+    "thal": "Thalassemia",
+    "target": "Diagnosis",
+    "prediction": "Diagnosis",
+}
 
 # Target Column in New Dataset
 TARGET_NAME = "prediction"
@@ -101,13 +144,10 @@ CRITICAL_LIFESTYLE_FEATURES = [
 ALL_10_TEMPORAL_VARIABLES = CRITICAL_NUMERICAL_FEATURES + CRITICAL_LIFESTYLE_FEATURES
 
 PREVIOUS_VALUE_COLS = [f"prev_{col}" for col in ALL_10_TEMPORAL_VARIABLES]
-CHANGE_COLS = [f"{col}_change" for col in CRITICAL_NUMERICAL_FEATURES] + [f"{col}_changed" for col in CRITICAL_LIFESTYLE_FEATURES]
-RATE_COLS = [f"{col}_rate" for col in CRITICAL_NUMERICAL_FEATURES]
 
-# All ML Model Feature Columns (Baseline + Previous + Changes + Rates)
-ALL_MODEL_FEATURE_COLS = (
-    BASELINE_FEATURE_COLS
-    + PREVIOUS_VALUE_COLS
-    + CHANGE_COLS
-    + RATE_COLS
-)
+# Only the eight numeric deltas and two categorical change flags enter the model.
+CHANGE_COLS = [
+    f"delta_{col}" for col in CRITICAL_NUMERICAL_FEATURES
+] + ["smoking_changed", "physical_activity_changed"]
+RATE_COLS = []
+ALL_MODEL_FEATURE_COLS = BASELINE_FEATURE_COLS + CHANGE_COLS

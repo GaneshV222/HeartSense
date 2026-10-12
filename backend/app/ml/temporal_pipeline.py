@@ -1,29 +1,7 @@
-"""
-HeartSense – True Longitudinal Temporal Pipeline + Database + ML/DL
+"""HeartSense PostgreSQL temporal-history and verified prediction workflows.
 
-This module implements:
-  1. Dataset inspection and verification (heart_disease_prediction_2026.csv as Single Source of Truth)
-  2. PostgreSQL ingestion:
-     - patients: unique patient master records
-     - patient_visits: permanent history of all visits
-     - temporal_patient_data: ONLY the latest two visits per patient for temporal changes and rates
-  3. Zero-leakage temporal feature preparation:
-     - 24 baseline clinical & lifestyle features
-     - 10 previous values (8 numerical, 2 lifestyle)
-     - 10 temporal changes (8 numerical changes, 2 lifestyle changes)
-     - 8 temporal rates of change (change / days_between_visits)
-  4. SMOTE balancing applied before train/test split
-  5. Dual Pipeline Model Suite & Comparative Analysis:
-     - Baseline Models (Before Temporal Data: 24 standard features)
-     - Longitudinal Models (After Temporal Data: 24 baseline + 10 previous + 10 changes + 8 rates)
-     Approved Models:
-       - XGBoost (XGBClassifier)
-       - Gradient Boosting (GradientBoostingClassifier)
-       - AdaBoost (AdaBoostClassifier)
-       - LightGBM (LGBMClassifier)
-       - Compact MLP Neural Network (MLPClassifier)
-  6. Multi-metric evaluation and feature importance extraction
-  7. Prediction and manual visit ingestion endpoints
+Source validation, SMOTE-before-split training, evaluation, and optional import are
+implemented by :mod:`app.ml.verified_pipeline`.
 """
 
 from __future__ import annotations
@@ -181,7 +159,7 @@ from app.config import (
     RATE_COLS,
     ALL_MODEL_FEATURE_COLS,
 )
-from app.database import engine, init_db, reset_db_tables, get_session
+from app.database import engine, init_db, get_session
 from app.models import Patient, PatientVisit, TemporalPatientData, Prediction
 from app.services.temporal_service import (
     TemporalFeatureService,
@@ -189,6 +167,7 @@ from app.services.temporal_service import (
     CATEGORICAL_VARIABLES,
     VARIABLE_METADATA,
     normalize_smoking_value,
+    normalize_legacy_temporal_snapshot,
     _safe_float,
     _safe_str,
 )
@@ -197,6 +176,7 @@ from app.services.patient_service import (
     create_visit,
     create_prediction,
     get_patient_by_id,
+    get_patient_visits,
 )
 
 
@@ -234,6 +214,10 @@ def inspect_and_clean_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str,
     """
     Inspect dataset integrity and clean values according to the new dataset schema.
     """
+    raise RuntimeError(
+        "Legacy cleaning could invent IDs, dates, or labels. "
+        "Use load_and_validate_dataset instead."
+    )
     original_records = len(df)
     original_columns = len(df.columns)
 
@@ -302,8 +286,10 @@ def ingest_dataset_to_postgresql(df: pd.DataFrame) -> Dict[str, Any]:
       2. patient_visits (permanent history of all visits)
       3. temporal_patient_data (ONLY the latest two visits per patient)
     """
-    print("[Database] Resetting tables for fresh dataset ingestion...")
-    reset_db_tables()
+    raise RuntimeError(
+        "Legacy whole-database ingestion is disabled. Use the source-scoped importer "
+        "with an explicit backup and expected database."
+    )
 
     # Sort dataset chronologically per patient
     df = df.sort_values(by=["patient_id", "visit_date", "visit_number"]).reset_index(drop=True)
@@ -853,6 +839,9 @@ def store_smote_synthetic_visits(
 
     Returns a dict with insert statistics.
     """
+    raise RuntimeError(
+        "Synthetic SMOTE rows are stored as training records, not patient visits."
+    )
     n_original = len(X_original_proc)
     n_total = len(X_resampled_proc)
     synthetic_proc = X_resampled_proc[n_original:]          # shape (n_synth, n_features)
@@ -1020,6 +1009,9 @@ def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str,
       - Evaluates models Before Temporal (Baseline 24 features) and After Temporal (Baseline + Previous + Changes + Rates)
       - Generates comparative analytics & persists all artifacts.
     """
+    raise RuntimeError(
+        "Use the verified SMOTE-before-split pipeline wrapper defined later in this module."
+    )
     dataset_path = dataset_path or DATASET_PATH
 
     print("=" * 75)
@@ -1373,8 +1365,7 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
                 f"No temporal data found for patient_id: '{patient_id}'"
             )
 
-        temporal_data = dict(temporal_row)
-
+        temporal_data = normalize_legacy_temporal_snapshot(dict(temporal_row))
 
         num_cols = artifact.get("num_cols", [])
         cat_cols = artifact.get("cat_cols", [])
@@ -1607,39 +1598,29 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
 
         return {
             "patient_id": str(patient_id),
-
             "patient_code": str(patient_id),
-
             "prediction": {
                 "prediction": prediction_label,
                 "probability": risk_score,
                 "risk_category": risk_category,
                 "model_name": artifact["model_name"],
             },
-
             "risk_prediction": prediction_label,
-
             "risk_probability": risk_score,
-
             "risk_category": risk_category,
-
             "assessment_date": str(
                 latest_visit.get(
                     "visit_date",
                     datetime.utcnow()
                 )
             ),
-
             "model_name": artifact["model_name"],
-
-            # Already calculated temporal data
             "temporal_data": temporal_data,
-
+            "temporal_snapshot": temporal_data,
             "temporal_features": {
                 "numerical": num_details,
                 "categorical": cat_details,
             },
-
             "current_values": {
                 v: temporal_data.get(
                     f"current_{v}",
@@ -1647,28 +1628,22 @@ def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
                 )
                 for v in ALL_10_TEMPORAL_VARIABLES
             },
-
             "previous_values": {
                 v: temporal_data.get(
                     f"previous_{v}"
                 )
                 for v in ALL_10_TEMPORAL_VARIABLES
             },
-
             "has_previous_visit": (
                 temporal_data.get("previous_visit_id")
                 is not None
             ),
-
             "is_first_visit": (
                 temporal_data.get("previous_visit_id")
                 is None
             ),
-
             "number_of_visits": len(visits),
-
             "visit_number": len(visits),
-
             "timeline": timeline,
         }
 
@@ -1759,3 +1734,448 @@ def insert_manual_visit(
 def load_visits_from_db(): pass
 def load_mapping(): return {}
 def generate_temporal_features(df): return df
+
+
+def run_temporal_training_pipeline(
+    dataset_path: str | None = None,
+    temporal_dataset_path: str | None = None,
+    *,
+    import_database: bool = False,
+    backup_path: str | None = None,
+    expected_database: str | None = None,
+    store_smote_database: bool = False,
+) -> Dict[str, Any]:
+    """Run the verified SMOTE-before-split training workflow; database replacement is opt-in."""
+    from app.config import TEMPORAL_DATASET_PATH
+    from app.ml.verified_pipeline import run_verified_training_pipeline
+
+    report = run_verified_training_pipeline(
+        dataset_path or DATASET_PATH,
+        temporal_dataset_path or TEMPORAL_DATASET_PATH,
+        import_database=import_database,
+        backup_path=backup_path,
+        expected_database=expected_database,
+        store_smote_database=store_smote_database,
+    )
+    report["best_name"] = report["optimized"]["model"]
+    return report
+
+
+def ingest_dataset_to_postgresql(
+    df: pd.DataFrame,
+    *,
+    backup_path: str | None = None,
+    expected_database: str | None = None,
+) -> Dict[str, Any]:
+    """Import validated source visits only with the approved backup and database guard."""
+    if not backup_path or not expected_database:
+        raise ValueError(
+            "Dataset import requires an explicit backup_path and expected_database."
+        )
+    from app.ml.verified_pipeline import _import_dataset
+
+    return _import_dataset(
+        df,
+        backup_path=backup_path,
+        expected_database=expected_database,
+    )
+
+
+def store_smote_synthetic_visits(*args: Any, **kwargs: Any) -> None:
+    raise RuntimeError(
+        "Synthetic SMOTE rows are stored in smote_training_records, not patient_visits."
+    )
+
+
+def prepare_ml_features_from_dataset(
+    df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """Prepare the exact approved 34-feature schema from validated real visits."""
+    from app.ml.verified_pipeline import (
+        TARGET_COLUMN,
+        VISIT_COLUMNS,
+        _normalise_categorical_values,
+        _normalise_columns,
+        prepare_verified_features,
+        MODEL_FEATURE_COLUMNS,
+    )
+
+    normalized = _normalise_columns(df)
+    required = set(BASELINE_FEATURE_COLS) | set(VISIT_COLUMNS) | {TARGET_COLUMN}
+    missing = sorted(required - set(normalized.columns))
+    if missing:
+        raise ValueError(f"Visit data is missing required columns: {missing}")
+    normalized["visit_date"] = pd.to_datetime(
+        normalized["visit_date"], errors="coerce"
+    )
+    target = pd.to_numeric(normalized[TARGET_COLUMN], errors="coerce")
+    if normalized["visit_date"].isna().any() or target.isna().any() or not target.isin([0, 1]).all():
+        raise ValueError("Visit data contains invalid dates or non-binary target labels.")
+    normalized[TARGET_COLUMN] = target.astype(int)
+    normalized["patient_id"] = normalized["patient_id"].astype("string").str.strip()
+    normalized = _normalise_categorical_values(normalized)
+    features, labels = prepare_verified_features(normalized)
+    missing_features = [name for name in MODEL_FEATURE_COLUMNS if name not in features]
+    if missing_features or len(MODEL_FEATURE_COLUMNS) != 34:
+        raise ValueError("The verified model feature schema is incomplete.")
+    return features, labels
+
+
+def predict_latest_for_patient(patient_id: str) -> Dict[str, Any]:
+    """Predict from the latest genuine visit and its immediately prior visit."""
+    from app.ml.verified_pipeline import (
+        CATEGORICAL_BASE_COLUMNS,
+        CATEGORICAL_TEMPORAL_VARIABLES,
+        MODEL_FEATURE_COLUMNS,
+        NUMERICAL_FEATURE_COLUMNS,
+        NUMERICAL_TEMPORAL_VARIABLES,
+        TARGET_MAPPING,
+        TEMPORAL_FEATURE_COLUMNS,
+        _normalise_categorical_values,
+    )
+
+    artifact_path = Path(MODEL_ARTIFACT_DIR) / "temporal_model_artifact.joblib"
+    if not artifact_path.is_file():
+        raise FileNotFoundError(
+            f"Active verified model artifact not found: {artifact_path}"
+        )
+    artifact = joblib.load(artifact_path)
+    if artifact.get("feature_columns") != list(MODEL_FEATURE_COLUMNS):
+        raise RuntimeError("Active model feature manifest is incompatible with prediction.")
+    model = artifact["model"]
+    preprocessor = artifact["preprocessor"]
+
+    session = get_session()
+    try:
+        visits = get_patient_visits(session, str(patient_id))
+        if not visits:
+            raise ValueError(f"No genuine visits found for patient_id '{patient_id}'.")
+        latest_visit = visits[-1]
+        previous_visit = visits[-2] if len(visits) > 1 else None
+        current_data = latest_visit.to_feature_dict()
+        previous_data = (
+            previous_visit.to_feature_dict() if previous_visit is not None else None
+        )
+        snapshot = TemporalFeatureService.calculate_snapshot(
+            current_data=current_data,
+            previous_data=previous_data,
+            patient_id=str(patient_id),
+            current_visit_id=latest_visit.id,
+            previous_visit_id=previous_visit.id if previous_visit else None,
+            current_visit_date=latest_visit.visit_date,
+            previous_visit_date=previous_visit.visit_date if previous_visit else None,
+        )
+
+        row: Dict[str, Any] = {
+            column: getattr(latest_visit, column, None)
+            for column in BASELINE_FEATURE_COLS
+        }
+        for column in TEMPORAL_FEATURE_COLUMNS:
+            row[column] = snapshot.get(column)
+        feature_frame = pd.DataFrame(
+            [{column: row.get(column) for column in MODEL_FEATURE_COLUMNS}],
+            columns=MODEL_FEATURE_COLUMNS,
+        )
+        feature_frame = _normalise_categorical_values(feature_frame)
+        for column in NUMERICAL_FEATURE_COLUMNS:
+            try:
+                feature_frame[column] = pd.to_numeric(
+                    feature_frame[column], errors="raise"
+                ).astype(float)
+            except (TypeError, ValueError) as exc:
+                value = feature_frame.at[0, column]
+                raise ValueError(
+                    f"Invalid numeric prediction feature '{column}': {value!r}"
+                ) from exc
+        for column in CATEGORICAL_BASE_COLUMNS:
+            value = feature_frame.at[0, column]
+            if value is not None and not pd.isna(value):
+                feature_frame.at[0, column] = str(value)
+
+        transformed = preprocessor.transform(feature_frame)
+        classes = list(model.classes_)
+        if 1 not in classes:
+            raise RuntimeError(f"Active model has no positive target class: {classes}")
+        probabilities = model.predict_proba(transformed)[0]
+        positive_probability = float(probabilities[classes.index(1)])
+        threshold = float(artifact.get("threshold", 0.5))
+        prediction = int(positive_probability >= threshold)
+        label = TARGET_MAPPING[str(prediction)]
+        risk_category = "High Risk" if prediction == 1 else "Low Risk"
+
+        numerical_details = []
+        current_values: Dict[str, Any] = {}
+        previous_values: Dict[str, Any] = {}
+        for variable in ALL_10_TEMPORAL_VARIABLES:
+            current_value = snapshot.get(f"current_{variable}")
+            previous_value = snapshot.get(f"previous_{variable}")
+            current_values[variable] = current_value
+            previous_values[variable] = previous_value
+            if variable in NUMERICAL_TEMPORAL_VARIABLES:
+                change = snapshot.get(f"delta_{variable}")
+                numerical_details.append(
+                    {
+                        "feature": variable,
+                        "label": VARIABLE_METADATA.get(variable, {}).get("label", variable),
+                        "unit": VARIABLE_METADATA.get(variable, {}).get("unit", ""),
+                        "current": current_value,
+                        "previous": previous_value,
+                        "change": change,
+                        "delta": change,
+                        "rate": None,
+                        "status": (
+                            "No previous visit available"
+                            if previous_value is None
+                            else str(change)
+                        ),
+                    }
+                )
+        categorical_details = [
+            {
+                "feature": variable,
+                "label": VARIABLE_METADATA.get(variable, {}).get("label", variable),
+                "current": snapshot.get(f"current_{variable}"),
+                "previous": snapshot.get(f"previous_{variable}"),
+                "changed": snapshot.get(f"{variable}_changed"),
+                "status": (
+                    "No previous visit available"
+                    if snapshot.get(f"previous_{variable}") is None
+                    else (
+                        "Changed"
+                        if snapshot.get(f"{variable}_changed")
+                        else "Unchanged"
+                    )
+                ),
+            }
+            for variable in CATEGORICAL_TEMPORAL_VARIABLES
+        ]
+        temporal = {
+            **snapshot,
+            "smoking_status_changed": snapshot.get("smoking_changed"),
+        }
+        timeline = TemporalFeatureService.get_patient_temporal_timeline(
+            session, str(patient_id)
+        )
+        return {
+            "patient_id": str(patient_id),
+            "patient_code": str(patient_id),
+            "prediction": {
+                "prediction": prediction,
+                "probability": positive_probability,
+                "risk_category": risk_category,
+                "label": label,
+                "model_name": artifact["model_name"],
+            },
+            "risk_prediction": prediction,
+            "risk_probability": positive_probability,
+            "risk_category": risk_category,
+            "assessment_date": latest_visit.visit_date.isoformat(),
+            "model_name": artifact["model_name"],
+            "temporal_data": temporal,
+            "temporal_snapshot": temporal,
+            "temporal_features": {
+                "numerical": numerical_details,
+                "categorical": categorical_details,
+            },
+            "current_values": current_values,
+            "previous_values": previous_values,
+            "has_previous_visit": previous_visit is not None,
+            "is_first_visit": previous_visit is None,
+            "number_of_visits": len(visits),
+            "visit_number": latest_visit.visit_number or len(visits),
+            "timeline": timeline,
+        }
+    finally:
+        session.close()
+
+
+def insert_manual_visit(
+    patient_id: str,
+    clinical_data: Dict[str, Any],
+    visit_date: datetime | None = None,
+) -> Dict[str, Any]:
+    """Store an actual patient assessment, recalculate temporal features, then predict."""
+    from math import isfinite
+
+    from app.ml.verified_pipeline import (
+        CLINICAL_SCREENING_BOUNDS,
+        CATEGORICAL_BASE_COLUMNS,
+        CATEGORICAL_TEMPORAL_VARIABLES,
+    )
+
+    numeric_columns = set(BASELINE_FEATURE_COLS) - set(CATEGORICAL_BASE_COLUMNS)
+    aliases = {
+        "sex": "gender",
+        "cp": "chest_pain_type",
+        "trestbps": "systolic_bp",
+        "chol": "cholesterol",
+        "fbs": "fasting_blood_sugar",
+        "restecg": "resting_ecg",
+        "thalach": "max_heart_rate",
+        "exang": "exercise_angina",
+        "slope": "st_slope",
+        "ca": "num_major_vessels",
+        "thal": "thalassemia",
+        "smoking_status": "smoking",
+    }
+    values = dict(clinical_data)
+    for alias, canonical in aliases.items():
+        if alias in values and canonical not in values:
+            value = values[alias]
+            if alias == "sex":
+                value = {
+                    1: "Male",
+                    "1": "Male",
+                    0: "Female",
+                    "0": "Female",
+                }.get(value, value)
+            elif alias == "cp":
+                value = {
+                    0: "Typical Angina",
+                    "0": "Typical Angina",
+                    1: "Atypical Angina",
+                    "1": "Atypical Angina",
+                    2: "Non-anginal Pain",
+                    "2": "Non-anginal Pain",
+                    3: "Asymptomatic",
+                    "3": "Asymptomatic",
+                }.get(value, value)
+            elif alias in {"fbs", "exang"}:
+                if isinstance(value, str):
+                    lowered = value.strip().lower()
+                    if lowered in {"true", "yes", "y", "1"}:
+                        value = "true"
+                    elif lowered in {"false", "no", "n", "0"}:
+                        value = "false"
+                else:
+                    value = "true" if bool(value) else "false"
+            elif alias == "restecg":
+                value = {
+                    0: "Normal",
+                    "0": "Normal",
+                    1: "ST-T Wave Abnormality",
+                    "1": "ST-T Wave Abnormality",
+                    2: "Left Ventricular Hypertrophy",
+                    "2": "Left Ventricular Hypertrophy",
+                }.get(value, value)
+            elif alias == "slope":
+                value = {
+                    1: "Up",
+                    "1": "Up",
+                    2: "Flat",
+                    "2": "Flat",
+                    3: "Down",
+                    "3": "Down",
+                }.get(value, value)
+            elif alias == "thal":
+                value = {
+                    1: "Normal",
+                    "1": "Normal",
+                    2: "Fixed Defect",
+                    "2": "Fixed Defect",
+                    3: "Reversible Defect",
+                    "3": "Reversible Defect",
+                }.get(value, value)
+            values[canonical] = value
+    for alias in aliases:
+        values.pop(alias, None)
+    for field in (
+        "patient_id",
+        "patient_code",
+        "patientCode",
+        "visit_number",
+        "visit_date",
+        "visit_timestamp",
+        "prediction",
+        "target",
+        "is_synthetic",
+        "source_dataset",
+        "source_patient_id",
+        "raw_data",
+    ):
+        values.pop(field, None)
+    if values.get("gender") is not None:
+        gender = str(values["gender"]).strip()
+        values["gender"] = {
+            "m": "Male",
+            "male": "Male",
+            "f": "Female",
+            "female": "Female",
+        }.get(gender.casefold(), gender)
+    for column in CATEGORICAL_BASE_COLUMNS:
+        value = values.get(column)
+        if isinstance(value, bool):
+            values[column] = str(value).lower()
+        elif value is not None:
+            values[column] = str(value).strip()
+    for column in numeric_columns:
+        value = values.get(column)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            raise ValueError(f"Assessment value for '{column}' must be numeric, not boolean.")
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid numeric assessment value for '{column}'.") from exc
+        if not isfinite(numeric_value):
+            raise ValueError(f"Assessment value for '{column}' must be finite.")
+        if column in CLINICAL_SCREENING_BOUNDS:
+            lower, upper = CLINICAL_SCREENING_BOUNDS[column]
+            if numeric_value < lower or numeric_value > upper:
+                raise ValueError(
+                    f"Assessment value for '{column}' must be between {lower} and {upper}."
+                )
+        values[column] = numeric_value
+
+    assessed_at = visit_date or datetime.utcnow()
+    if assessed_at.tzinfo is not None:
+        assessed_at = assessed_at.replace(tzinfo=None)
+    session = get_session()
+    try:
+        create_patient(
+            session=session,
+            patient_id=str(patient_id),
+            name=values.get("name"),
+            gender=values.get("gender"),
+            age=values.get("age"),
+        )
+        visit_number = (
+            session.query(PatientVisit).filter_by(patient_id=str(patient_id)).count()
+            + 1
+        )
+        visit = create_visit(
+            session=session,
+            patient_id=str(patient_id),
+            visit_date=assessed_at,
+            clinical_values=values,
+            visit_number=visit_number,
+        )
+        visits = get_patient_visits(session, str(patient_id))
+        current_visit = visits[-1]
+        previous_visit = visits[-2] if len(visits) > 1 else None
+        TemporalFeatureService.upsert_temporal_patient_data(
+            session=session,
+            patient_id=str(patient_id),
+            current_visit=current_visit,
+            previous_visit=previous_visit,
+        )
+        session.commit()
+        result = predict_latest_for_patient(str(patient_id))
+        create_prediction(
+            session=session,
+            patient_id=str(patient_id),
+            visit_id=current_visit.id,
+            visit_date=current_visit.visit_date,
+            prediction=result["risk_prediction"],
+            probability=result["risk_probability"],
+            risk_level=result["risk_category"],
+            model_name=result["model_name"],
+        )
+        session.commit()
+        return result
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

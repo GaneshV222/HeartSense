@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+﻿import { NavLink } from 'react-router-dom';
 import { HeartPulse, Home, Search, PlusCircle, BarChart2, Info } from 'lucide-react';
 
 export default function Sidebar() {
@@ -49,3 +49,5 @@ export default function Sidebar() {
     </div>
   );
 }
+
+

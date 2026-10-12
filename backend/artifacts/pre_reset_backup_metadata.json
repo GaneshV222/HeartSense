@@ -1,0 +1,11 @@
+{
+  "tables": {
+    "patient_visits": 137443,
+    "patients": 76503,
+    "temporal_patient_data": 39686,
+    "predictions": 0,
+    "patient_temporal_features": 39686,
+    "model_runs": 0
+  },
+  "timestamp": "2026-10-11T23:16:00"
+}

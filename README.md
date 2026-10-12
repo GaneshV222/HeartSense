@@ -21,47 +21,41 @@ The application uses a decoupled architecture:
 - **Backend**: Python (FastAPI) serving the REST API and orchestrating the ML pipeline.
 - **Database**: PostgreSQL (via SQLAlchemy) storing patient histories and assessment results.
 
-## 4. Phase 1 – Data Preparation
-Exact required order implemented:
-1. Patient Clinical Data (Cleveland Heart Disease Dataset)
-2. Data Preprocessing (Imputation, numerical conversion)
-3. **SMOTE** (Class balancing applied *before* train-test split)
-4. Feature Selection (SelectKBest applied *after* SMOTE)
-5. Train-Test Split (Stratified split creating final Training and Test datasets)
+## 4. Verified datasets and model training
 
-## 5. Phase 2 – Model Development & Selection
-Uses exactly these 6 models:
-1. Logistic Regression
-2. Decision Tree
-3. Random Forest
-4. K-Nearest Neighbors (KNN)
-5. Support Vector Machine (SVM)
-6. Gaussian Naive Bayes
+The training workflow reads `backend/data/heart_disease_prediction_2026.csv` for labeled visits and `backend/data/temporal_dataset.xlsx` (worksheet `temporal_dataset`) for comparison only. Visit-derived history is authoritative; the workbook's precomputed previous values are not used as genuine history.
 
-Hyperparameter tuning is performed via `GridSearchCV` exclusively on the training set. The best-performing model is automatically selected based on evaluation metrics.
+The model uses the 24 configured clinical features plus eight numeric changes and two lifestyle-change indicators. Patient IDs and labels are not predictors. SMOTENC is applied to the complete 100001-row labeled dataset before the train, validation, and test split, producing 140002 complete model records. The workflow compares the current XGBoost configuration with tuned XGBoost variants and a Gradient Boosting candidate; it reports measured metrics and does not guarantee a target accuracy.
 
-## 6. Phase 3 – Model Evaluation
-Models are evaluated using:
-- Accuracy
-- Precision
-- Recall / Sensitivity
-- Specificity
-- F1-Score
-- ROC-AUC
+Training without database replacement:
 
-## 7. Phase 4 – Dynamic / Temporal Risk Assessment
-Tracks patient clinical values across multiple chronological visits.
-- Retrieves historical records
-- Uses timestamps
-- Compares previous and current clinical values
-- Identifies relevant changes (Increased, Decreased, Stable)
-- Generates current risk assessment
+```powershell
+python train.py
+```
 
-## 8. ML Models
-The backend strictly uses the 6 approved models mentioned in Phase 2. No deep learning or additional gradient boosting frameworks (like XGBoost or LightGBM) are used.
+To explicitly import/replace source-scoped rows in PostgreSQL, supply the verified pre-import backup and exact database name:
 
-## 9. Evaluation Metrics
-Metrics are generated during the training phase and served via the `/api/analytics` endpoint for visualization in the React dashboard.
+```powershell
+python train.py --import-database --backup-path "C:\path\to\verified-backup.csv" --expected-database heartsense
+```
+
+To store only the complete real-plus-synthetic SMOTE training records in PostgreSQL without replacing clinical visit rows:
+
+```powershell
+python train.py --store-smote-database --expected-database heartsense
+```
+
+The import checks that the backup patient IDs exactly match the dataset IDs and refuses to replace legacy patients with dependent application data. It does not drop tables or reset the database. Genuine visits remain in the clinical visit tables; the full real-plus-synthetic SMOTE result is stored separately in `smote_training_records` and exported to `backend/artifacts/smote_training_records.csv`. A validated model candidate is promoted only after training, artifact reload checks, and any requested import succeed.
+
+## 5. Temporal risk assessment
+
+Temporal changes are calculated from the immediately preceding genuine visit for the same patient. A first visit has null history-derived changes; missing history is not converted to zero. Rate-of-change features are not generated or used by the model. The existing PostgreSQL patient, visit, temporal-data, and prediction-history tables remain in use.
+
+## 6. Evaluation
+
+Training reports accuracy, precision, sensitivity, specificity, F1, ROC-AUC, false-positive/negative rates, per-class metrics, confusion matrices, stratified cross-validation on the resampled training matrix, and the original/resampled class counts. Results are written to `backend/artifacts/temporal_pipeline_summary.json` and `backend/artifacts/model_metrics.json`, and served through the existing analytics endpoint.
+
+Relative `MODEL_ARTIFACT_DIR` values are resolved from `backend/`, independent of the command's working directory. The active temporal model and its feature manifest are stored together in that directory.
 
 ## 10. Frontend Architecture
 - **React + TypeScript + Vite**

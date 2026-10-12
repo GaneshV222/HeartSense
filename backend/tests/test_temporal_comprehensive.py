@@ -49,9 +49,9 @@ def cleanup_test_patients(patient_codes: list[str]):
     with engine.begin() as con:
         for code in patient_codes:
             con.execute(text("DELETE FROM predictions WHERE patient_code = :p"), {"p": code})
-            con.execute(text("DELETE FROM patient_temporal_features WHERE patient_id = :p"), {"p": code})
-            con.execute(text("DELETE FROM patient_visits WHERE source_patient_id = :p"), {"p": code})
-            con.execute(text("DELETE FROM patients WHERE patient_code = :p"), {"p": code})
+            con.execute(text("DELETE FROM temporal_patient_data WHERE patient_id = :p"), {"p": code})
+            con.execute(text("DELETE FROM patient_visits WHERE patient_id = :p"), {"p": code})
+            con.execute(text("DELETE FROM patients WHERE patient_id = :p"), {"p": code})
 
 
 class TestTemporal12Points(unittest.TestCase):
@@ -235,7 +235,7 @@ class TestTemporal12Points(unittest.TestCase):
             fresh_session = get_session()
             try:
                 ptf_row = fresh_session.execute(
-                    text("SELECT * FROM patient_temporal_features WHERE patient_id = :p"),
+                    text("SELECT * FROM temporal_patient_data WHERE patient_id = :p"),
                     {"p": pid}
                 ).mappings().first()
 

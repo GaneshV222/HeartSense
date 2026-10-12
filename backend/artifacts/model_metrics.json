@@ -1,28 +1,59 @@
 {
-  "model_name": "XGBoost",
-  "model_type": "ML Ensemble",
-  "accuracy": 0.8442,
-  "precision": 0.8467,
-  "recall": 0.8442,
-  "specificity": 0.8869,
-  "f1": 0.8439,
-  "roc_auc": 0.9235,
-  "pr_auc": 0.9364,
+  "accuracy": 0.9286454055212314,
+  "precision": 0.9151791891517919,
+  "recall_sensitivity": 0.9448571428571428,
+  "specificity": 0.9124348260838512,
+  "f1": 0.9297814015604133,
+  "roc_auc": 0.9827043706061812,
+  "pr_auc": 0.9832182538721276,
+  "false_positive_rate": 0.08756517391614885,
+  "false_negative_rate": 0.055142857142857146,
   "confusion_matrix": {
-    "tn": 12410,
-    "fp": 1583,
-    "fn": 2777,
-    "tp": 11216,
+    "labels": [
+      0,
+      1
+    ],
     "matrix": [
       [
-        12410,
-        1583
+        12775,
+        1226
       ],
       [
-        2777,
-        11216
+        772,
+        13228
       ]
-    ]
+    ],
+    "tn": 12775,
+    "fp": 1226,
+    "fn": 772,
+    "tp": 13228
   },
-  "training_time_seconds": 1.34
+  "per_class": {
+    "0": {
+      "precision": 0.9430132132575478,
+      "recall": 0.9124348260838512,
+      "f1-score": 0.9274720487875708,
+      "support": 14001.0
+    },
+    "1": {
+      "precision": 0.9151791891517919,
+      "recall": 0.9448571428571428,
+      "f1-score": 0.9297814015604133,
+      "support": 14000.0
+    },
+    "accuracy": 0.9286454055212314,
+    "macro avg": {
+      "precision": 0.9290962012046698,
+      "recall": 0.9286459844704971,
+      "f1-score": 0.9286267251739921,
+      "support": 28001.0
+    },
+    "weighted avg": {
+      "precision": 0.9290966982230638,
+      "recall": 0.9286454055212314,
+      "f1-score": 0.9286266839370224,
+      "support": 28001.0
+    }
+  },
+  "threshold": 0.48
 }

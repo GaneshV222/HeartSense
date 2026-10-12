@@ -3,7 +3,7 @@ HeartSense – Patient Assessment API
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from app.schemas import AssessmentRequest
 from app.ml.temporal_pipeline import (
@@ -46,9 +46,16 @@ def predict_risk(request: AssessmentRequest):
         visit_dt = None
         if v_date_str:
             try:
-                visit_dt = datetime.fromisoformat(str(v_date_str).replace('Z', '+00:00')).replace(tzinfo=None)
-            except Exception:
-                visit_dt = None
+                visit_dt = datetime.fromisoformat(
+                    str(v_date_str).replace("Z", "+00:00")
+                )
+                if visit_dt.tzinfo is not None:
+                    visit_dt = visit_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid assessment date: {v_date_str}",
+                ) from exc
 
         if clinical:
             insert_manual_visit(str(pid), clinical, visit_dt)
@@ -68,6 +75,8 @@ def predict_risk(request: AssessmentRequest):
             },
             "is_first_visit": result["is_first_visit"],
         }
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except ValueError as e:

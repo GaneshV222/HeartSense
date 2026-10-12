@@ -1,12 +1,13 @@
 """
-HeartSense – SQLAlchemy ORM Models
+HeartSense â€“ SQLAlchemy ORM Models
 
 Tables:
-  • patients               – unique master patient records (patient_id PK)
-  • patient_visits         – permanent historical visits for all patients
-  • temporal_patient_data  – ONLY the latest two visits per patient for temporal deltas and rates
-  • predictions            – ML CVD risk predictions linked to patient visits
-  • model_runs             – metadata and evaluation metrics for training runs
+  â€¢ patients               â€“ unique master patient records (patient_id PK)
+  â€¢ patient_visits         â€“ permanent historical visits for all patients
+  â€¢ temporal_patient_data  â€“ ONLY the latest two visits per patient for approved temporal changes
+  â€¢ smote_training_records â€“ complete resampled training rows generated from SMOTE
+  â€¢ predictions            â€“ ML CVD risk predictions linked to patient visits
+  â€¢ model_runs             â€“ metadata and evaluation metrics for training runs
 """
 
 from datetime import datetime
@@ -26,9 +27,11 @@ class Patient(Base):
     __tablename__ = "patients"
 
     patient_id = Column(String(100), primary_key=True, index=True)
+    patient_code = Column(String(100), nullable=True, index=True)
     name = Column(String(200), nullable=True)
     gender = Column(String(50), nullable=True)
     age = Column(Float, nullable=True)
+    source_dataset = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -54,9 +57,10 @@ class Patient(Base):
     def id(self) -> str:
         return self.patient_id
 
-    @property
-    def patient_code(self) -> str:
-        return self.patient_id
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.patient_code is None and self.patient_id is not None:
+            self.patient_code = self.patient_id
 
     def __repr__(self):
         return f"<Patient {self.patient_id}>"
@@ -76,7 +80,7 @@ class PatientVisit(Base):
     visit_date = Column(DateTime, nullable=False, index=True)
     visit_timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    # ── Clinical & Lifestyle Features from Dataset ─────────────────────────
+    # â”€â”€ Clinical & Lifestyle Features from Dataset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     age = Column(Float, nullable=True)
     gender = Column(String(50), nullable=True)
     bmi = Column(Float, nullable=True)
@@ -105,6 +109,7 @@ class PatientVisit(Base):
 
     prediction = Column(Integer, nullable=True)  # 0 or 1 dataset target
     is_synthetic = Column(Boolean, nullable=False, default=False)  # True for SMOTE-generated rows
+    source_dataset = Column(String(255), nullable=True)
     raw_data = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -120,9 +125,148 @@ class PatientVisit(Base):
     def target(self) -> int | None:
         return self.prediction
 
+    @property
+    def sex(self):
+        if self.gender is None:
+            return None
+        gender = str(self.gender).strip().lower()
+        if gender in {"male", "m", "1"}:
+            return 1
+        if gender in {"female", "f", "0"}:
+            return 0
+        return None
+
+    @sex.setter
+    def sex(self, value):
+        if value in (1, "1", "male", "m"):
+            self.gender = "Male"
+        elif value in (0, "0", "female", "f"):
+            self.gender = "Female"
+        else:
+            self.gender = value
+
+    @property
+    def cp(self):
+        value = self.chest_pain_type
+        if value is None:
+            return None
+        mapping = {
+            "typical angina": 0,
+            "typical_angina": 0,
+            "atypical angina": 1,
+            "atypical_angina": 1,
+            "non-anginal pain": 2,
+            "non_anginal_pain": 2,
+            "asymptomatic": 3,
+        }
+        return mapping.get(str(value).strip().lower(), value)
+
+    @cp.setter
+    def cp(self, value):
+        mapping = {0: "Typical Angina", 1: "Atypical Angina", 2: "Non-anginal Pain", 3: "Asymptomatic"}
+        self.chest_pain_type = mapping.get(value, value)
+
+    @property
+    def trestbps(self):
+        return self.systolic_bp
+
+    @trestbps.setter
+    def trestbps(self, value):
+        self.systolic_bp = value
+
+    @property
+    def chol(self):
+        return self.cholesterol
+
+    @chol.setter
+    def chol(self, value):
+        self.cholesterol = value
+
+    @property
+    def fbs(self):
+        value = self.fasting_blood_sugar
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return 1 if value.strip().lower() in {"true", "yes", "1", "y"} else 0 if value.strip().lower() in {"false", "no", "0", "n"} else None
+        return int(bool(value))
+
+    @fbs.setter
+    def fbs(self, value):
+        self.fasting_blood_sugar = "true" if bool(value) else "false"
+
+    @property
+    def restecg(self):
+        value = self.resting_ecg
+        if value is None:
+            return None
+        mapping = {"normal": 0, "horizontal": 1, "st-t wave abnormality": 1, "st_t_wave_abnormality": 1, "left ventricular hypertrophy": 2}
+        key = str(value).strip().lower()
+        return mapping.get(key, value)
+
+    @restecg.setter
+    def restecg(self, value):
+        mapping = {0: "Normal", 1: "ST-T Wave Abnormality", 2: "Left Ventricular Hypertrophy"}
+        self.resting_ecg = mapping.get(value, value)
+
+    @property
+    def thalach(self):
+        return self.max_heart_rate
+
+    @thalach.setter
+    def thalach(self, value):
+        self.max_heart_rate = value
+
+    @property
+    def exang(self):
+        value = self.exercise_angina
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return 1 if value.strip().lower() in {"true", "yes", "1", "y"} else 0 if value.strip().lower() in {"false", "no", "0", "n"} else None
+        return int(bool(value))
+
+    @exang.setter
+    def exang(self, value):
+        self.exercise_angina = "true" if bool(value) else "false"
+
+    @property
+    def slope(self):
+        value = self.st_slope
+        if value is None:
+            return None
+        mapping = {"up": 1, "flat": 2, "down": 3}
+        return mapping.get(str(value).strip().lower(), value)
+
+    @slope.setter
+    def slope(self, value):
+        mapping = {1: "Up", 2: "Flat", 3: "Down"}
+        self.st_slope = mapping.get(value, value)
+
+    @property
+    def ca(self):
+        return self.num_major_vessels
+
+    @ca.setter
+    def ca(self, value):
+        self.num_major_vessels = value
+
+    @property
+    def thal(self):
+        value = self.thalassemia
+        if value is None:
+            return None
+        mapping = {"normal": 1, "fixed defect": 2, "fixed_defect": 2, "reversible defect": 3, "reversible_defect": 3}
+        return mapping.get(str(value).strip().lower(), value)
+
+    @thal.setter
+    def thal(self, value):
+        mapping = {1: "Normal", 2: "Fixed Defect", 3: "Reversible Defect"}
+        self.thalassemia = mapping.get(value, value)
+
     def to_feature_dict(self) -> dict:
         """Return the clinical & lifestyle features as a dictionary."""
-        return {
+        data = {
             "patient_id": self.patient_id,
             "patient_code": self.patient_id,
             "visit_id": self.id,
@@ -131,24 +275,35 @@ class PatientVisit(Base):
             "assessment_date": self.visit_date.isoformat() if self.visit_date else None,
             "age": self.age,
             "gender": self.gender,
+            "sex": self.sex,
             "bmi": self.bmi,
             "chest_pain_type": self.chest_pain_type,
+            "cp": self.cp,
             "systolic_bp": self.systolic_bp,
+            "trestbps": self.trestbps,
             "diastolic_bp": self.diastolic_bp,
             "resting_heart_rate": self.resting_heart_rate,
             "max_heart_rate": self.max_heart_rate,
+            "thalach": self.thalach,
             "cholesterol": self.cholesterol,
+            "chol": self.chol,
             "hdl": self.hdl,
             "ldl": self.ldl,
             "fasting_blood_sugar": self.fasting_blood_sugar,
+            "fbs": self.fbs,
             "hba1c": self.hba1c,
             "diabetes": self.diabetes,
             "resting_ecg": self.resting_ecg,
+            "restecg": self.restecg,
             "exercise_angina": self.exercise_angina,
+            "exang": self.exang,
             "oldpeak": self.oldpeak,
             "st_slope": self.st_slope,
+            "slope": self.slope,
             "num_major_vessels": self.num_major_vessels,
+            "ca": self.ca,
             "thalassemia": self.thalassemia,
+            "thal": self.thal,
             "smoking": self.smoking or self.smoking_status,
             "smoking_status": self.smoking_status or self.smoking,
             "family_history": self.family_history,
@@ -157,6 +312,7 @@ class PatientVisit(Base):
             "prediction": self.prediction,
             "target": self.prediction,
         }
+        return data
 
     def __repr__(self):
         return f"<PatientVisit {self.patient_id} #{self.visit_number} @ {self.visit_date}>"
@@ -165,13 +321,14 @@ class PatientVisit(Base):
 class TemporalPatientData(Base):
     """
     Temporal representation for a patient.
-    Contains ONLY the latest two visits (previous and current) for calculating temporal changes and rates.
-    Upserted per patient – exactly one row per patient.
+    Contains ONLY the latest two visits (previous and current) for approved temporal changes.
+    Upserted per patient â€“ exactly one row per patient.
     """
     __tablename__ = "temporal_patient_data"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     patient_id = Column(String(100), ForeignKey("patients.patient_id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    source_dataset = Column(String(255), nullable=True)
 
     current_visit_id = Column(Integer, ForeignKey("patient_visits.id", ondelete="SET NULL"), nullable=True)
     previous_visit_id = Column(Integer, ForeignKey("patient_visits.id", ondelete="SET NULL"), nullable=True)
@@ -179,60 +336,60 @@ class TemporalPatientData(Base):
     previous_visit_date = Column(DateTime, nullable=True)
     days_between_visits = Column(Float, nullable=True)
 
-    # ── 1. Systolic BP ──────────────────────────────────────────────────────
+    # â”€â”€ 1. Systolic BP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_systolic_bp = Column(Float, nullable=True)
     previous_systolic_bp = Column(Float, nullable=True)
     systolic_bp_change = Column(Float, nullable=True)
     systolic_bp_rate = Column(Float, nullable=True)
 
-    # ── 2. Diastolic BP ─────────────────────────────────────────────────────
+    # â”€â”€ 2. Diastolic BP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_diastolic_bp = Column(Float, nullable=True)
     previous_diastolic_bp = Column(Float, nullable=True)
     diastolic_bp_change = Column(Float, nullable=True)
     diastolic_bp_rate = Column(Float, nullable=True)
 
-    # ── 3. Total Cholesterol ────────────────────────────────────────────────
+    # â”€â”€ 3. Total Cholesterol â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_cholesterol = Column(Float, nullable=True)
     previous_cholesterol = Column(Float, nullable=True)
     cholesterol_change = Column(Float, nullable=True)
     cholesterol_rate = Column(Float, nullable=True)
 
-    # ── 4. LDL ──────────────────────────────────────────────────────────────
+    # â”€â”€ 4. LDL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_ldl = Column(Float, nullable=True)
     previous_ldl = Column(Float, nullable=True)
     ldl_change = Column(Float, nullable=True)
     ldl_rate = Column(Float, nullable=True)
 
-    # ── 5. HDL ──────────────────────────────────────────────────────────────
+    # â”€â”€ 5. HDL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_hdl = Column(Float, nullable=True)
     previous_hdl = Column(Float, nullable=True)
     hdl_change = Column(Float, nullable=True)
     hdl_rate = Column(Float, nullable=True)
 
-    # ── 6. BMI ──────────────────────────────────────────────────────────────
+    # â”€â”€ 6. BMI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_bmi = Column(Float, nullable=True)
     previous_bmi = Column(Float, nullable=True)
     bmi_change = Column(Float, nullable=True)
     bmi_rate = Column(Float, nullable=True)
 
-    # ── 7. HbA1c ────────────────────────────────────────────────────────────
+    # â”€â”€ 7. HbA1c â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_hba1c = Column(Float, nullable=True)
     previous_hba1c = Column(Float, nullable=True)
     hba1c_change = Column(Float, nullable=True)
     hba1c_rate = Column(Float, nullable=True)
 
-    # ── 8. Resting Heart Rate ───────────────────────────────────────────────
+    # â”€â”€ 8. Resting Heart Rate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_resting_heart_rate = Column(Float, nullable=True)
     previous_resting_heart_rate = Column(Float, nullable=True)
     resting_heart_rate_change = Column(Float, nullable=True)
     resting_heart_rate_rate = Column(Float, nullable=True)
 
-    # ── 9. Smoking ──────────────────────────────────────────────────────────
+    # â”€â”€ 9. Smoking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_smoking = Column(String(50), nullable=True)
     previous_smoking = Column(String(50), nullable=True)
     smoking_changed = Column(Boolean, nullable=True)
 
-    # ── 10. Physical Activity ───────────────────────────────────────────────
+    # â”€â”€ 10. Physical Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     current_physical_activity = Column(String(100), nullable=True)
     previous_physical_activity = Column(String(100), nullable=True)
     physical_activity_changed = Column(Boolean, nullable=True)
@@ -242,109 +399,6 @@ class TemporalPatientData(Base):
 
     patient = relationship("Patient", back_populates="temporal_data")
 
-    # Compatibility aliases
-    @property
-    def delta_systolic_bp(self): return self.systolic_bp_change
-    @property
-    def delta_diastolic_bp(self): return self.diastolic_bp_change
-    @property
-    def delta_cholesterol(self): return self.cholesterol_change
-    @property
-    def delta_ldl(self): return self.ldl_change
-    @property
-    def delta_hdl(self): return self.hdl_change
-    @property
-    def delta_bmi(self): return self.bmi_change
-    @property
-    def delta_hba1c(self): return self.hba1c_change
-    @property
-    def delta_resting_heart_rate(self): return self.resting_heart_rate_change
-    @property
-    def current_smoking_status(self): return self.current_smoking
-    @property
-    def previous_smoking_status(self): return self.previous_smoking
-    @property
-    def smoking_status_changed(self): return self.smoking_changed
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "patient_id": self.patient_id,
-            "current_visit_id": self.current_visit_id,
-            "previous_visit_id": self.previous_visit_id,
-            "current_visit_date": self.current_visit_date.isoformat() if self.current_visit_date else None,
-            "previous_visit_date": self.previous_visit_date.isoformat() if self.previous_visit_date else None,
-            "days_between_visits": self.days_between_visits,
-            # Systolic BP
-            "current_systolic_bp": self.current_systolic_bp,
-            "previous_systolic_bp": self.previous_systolic_bp,
-            "systolic_bp_change": self.systolic_bp_change,
-            "systolic_bp_rate": self.systolic_bp_rate,
-            "delta_systolic_bp": self.systolic_bp_change,
-            # Diastolic BP
-            "current_diastolic_bp": self.current_diastolic_bp,
-            "previous_diastolic_bp": self.previous_diastolic_bp,
-            "diastolic_bp_change": self.diastolic_bp_change,
-            "diastolic_bp_rate": self.diastolic_bp_rate,
-            "delta_diastolic_bp": self.diastolic_bp_change,
-            # Cholesterol
-            "current_cholesterol": self.current_cholesterol,
-            "previous_cholesterol": self.previous_cholesterol,
-            "cholesterol_change": self.cholesterol_change,
-            "cholesterol_rate": self.cholesterol_rate,
-            "delta_cholesterol": self.cholesterol_change,
-            # LDL
-            "current_ldl": self.current_ldl,
-            "previous_ldl": self.previous_ldl,
-            "ldl_change": self.ldl_change,
-            "ldl_rate": self.ldl_rate,
-            "delta_ldl": self.ldl_change,
-            # HDL
-            "current_hdl": self.current_hdl,
-            "previous_hdl": self.previous_hdl,
-            "hdl_change": self.hdl_change,
-            "hdl_rate": self.hdl_rate,
-            "delta_hdl": self.hdl_change,
-            # BMI
-            "current_bmi": self.current_bmi,
-            "previous_bmi": self.previous_bmi,
-            "bmi_change": self.bmi_change,
-            "bmi_rate": self.bmi_rate,
-            "delta_bmi": self.bmi_change,
-            # HbA1c
-            "current_hba1c": self.current_hba1c,
-            "previous_hba1c": self.previous_hba1c,
-            "hba1c_change": self.hba1c_change,
-            "hba1c_rate": self.hba1c_rate,
-            "delta_hba1c": self.hba1c_change,
-            # Resting Heart Rate
-            "current_resting_heart_rate": self.current_resting_heart_rate,
-            "previous_resting_heart_rate": self.previous_resting_heart_rate,
-            "resting_heart_rate_change": self.resting_heart_rate_change,
-            "resting_heart_rate_rate": self.resting_heart_rate_rate,
-            "delta_resting_heart_rate": self.resting_heart_rate_change,
-            # Smoking
-            "current_smoking": self.current_smoking,
-            "previous_smoking": self.previous_smoking,
-            "smoking_changed": self.smoking_changed,
-            "current_smoking_status": self.current_smoking,
-            "previous_smoking_status": self.previous_smoking,
-            "smoking_status_changed": self.smoking_changed,
-            # Physical Activity
-            "current_physical_activity": self.current_physical_activity,
-            "previous_physical_activity": self.previous_physical_activity,
-            "physical_activity_changed": self.physical_activity_changed,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-    def __repr__(self):
-        return f"<TemporalPatientData {self.patient_id}>"
-
-
-# Backwards compatibility alias
-PatientTemporalFeature = TemporalPatientData
-TemporalPatientFeature = TemporalPatientData
 
 
 class Prediction(Base):
@@ -373,6 +427,7 @@ class Prediction(Base):
 
     def __repr__(self):
         return f"<Prediction patient={self.patient_id} pred={self.prediction} prob={self.probability}>"
+
 
 
 class ModelRun(Base):

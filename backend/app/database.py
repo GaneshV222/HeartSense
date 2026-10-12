@@ -49,39 +49,35 @@ def init_db():
 
     # Ensure indexes and tables exist idempotently
     with engine.begin() as conn:
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS ix_patient_visits_patient_id "
+            "ON patient_visits (patient_id)",
+            "CREATE INDEX IF NOT EXISTS ix_patient_visits_visit_date "
+            "ON patient_visits (visit_date)",
+            "CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id "
+            "ON temporal_patient_data (patient_id)",
+            "CREATE INDEX IF NOT EXISTS ix_predictions_patient_id "
+            "ON predictions (patient_id)",
+        ):
+            conn.execute(text(statement))
+        # Backward compatibility: older code/tests still reference patient_temporal_features,
+        # but the canonical table is temporal_patient_data.
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_patient_visits_patient_id ON patient_visits (patient_id);
-            CREATE INDEX IF NOT EXISTS ix_patient_visits_visit_date ON patient_visits (visit_date);
-            CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id ON temporal_patient_data (patient_id);
-            CREATE INDEX IF NOT EXISTS ix_predictions_patient_id ON predictions (patient_id);
+            CREATE OR REPLACE VIEW patient_temporal_features AS
+            SELECT * FROM temporal_patient_data;
         """))
-        # Idempotent migration: add is_synthetic column if it doesn't yet exist
-        conn.execute(text("""
-            ALTER TABLE patient_visits
-                ADD COLUMN IF NOT EXISTS is_synthetic BOOLEAN NOT NULL DEFAULT FALSE;
-        """))
+        for statement in (
+            "ALTER TABLE patient_visits "
+            "ADD COLUMN IF NOT EXISTS is_synthetic BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE patients ADD COLUMN IF NOT EXISTS source_dataset VARCHAR(255)",
+            "ALTER TABLE patient_visits "
+            "ADD COLUMN IF NOT EXISTS source_dataset VARCHAR(255)",
+            "ALTER TABLE temporal_patient_data "
+            "ADD COLUMN IF NOT EXISTS source_dataset VARCHAR(255)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_patient_visits_source_identity "
+            "ON patient_visits (source_dataset, patient_id, visit_number, visit_date) "
+            "WHERE source_dataset IS NOT NULL",
+        ):
+            conn.execute(text(statement))
 
     print("[Database] PostgreSQL tables created and verified successfully.")
-
-
-def reset_db_tables():
-    """Drop and recreate all tables for a clean migration to the new dataset."""
-    verify_db_connection()
-    from app.models import Base
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS patient_temporal_features CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS temporal_patient_data CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS predictions CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS model_runs CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS patient_visits CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS patients CASCADE;"))
-
-    Base.metadata.create_all(bind=engine)
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_patient_visits_patient_id ON patient_visits (patient_id);
-            CREATE INDEX IF NOT EXISTS ix_patient_visits_visit_date ON patient_visits (visit_date);
-            CREATE INDEX IF NOT EXISTS ix_temporal_patient_data_patient_id ON temporal_patient_data (patient_id);
-            CREATE INDEX IF NOT EXISTS ix_predictions_patient_id ON predictions (patient_id);
-        """))
-    print("[Database] PostgreSQL tables reset and recreated successfully.")

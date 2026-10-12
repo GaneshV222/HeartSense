@@ -4,14 +4,14 @@ HeartSense – TemporalFeatureService
 The single authoritative temporal feature calculation, persistence, and retrieval service.
 Encapsulates all logic for the critical cardiovascular features:
   - 8 Numerical: Systolic BP, Diastolic BP, Cholesterol, LDL, HDL, BMI, HbA1c, Resting Heart Rate
-    (Current, Previous, Change = Current - Previous, Rate = Change / days_between_visits)
+    (Current, Previous, Change = Current - Previous)
   - 2 Lifestyle: Smoking, Physical Activity
     (Current, Previous, Changed boolean flag)
 
 Rules:
   - temporal_patient_data contains ONLY the latest two visits per patient.
   - Previous values MUST come from the immediately preceding chronological visit of the SAME patient.
-  - If a patient has only 1 visit (first visit): previous = NULL, change = NULL, rate = NULL, changed = NULL.
+  - If a patient has only 1 visit (first visit): previous = NULL, change = NULL, changed = NULL.
   - Missing previous visit is NEVER treated as change = 0.
   - Upsert strategy ensures exactly one row per patient in temporal_patient_data.
 """
@@ -33,6 +33,45 @@ CATEGORICAL_VARIABLES = CRITICAL_LIFESTYLE_FEATURES
 
 NUMERICAL_DELTA_FIELDS = [f"delta_{var}" for var in NUMERICAL_VARIABLES] + [f"{var}_change" for var in NUMERICAL_VARIABLES]
 CATEGORICAL_CHANGED_FIELDS = [f"{var}_changed" for var in CATEGORICAL_VARIABLES]
+
+
+def normalize_legacy_temporal_snapshot(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Add legacy field aliases expected by older callers while preserving canonical SQLAlchemy columns."""
+    if snapshot is None:
+        return {}
+
+    normalized = dict(snapshot)
+
+    # Canonical temporal rows are stored under current_* / previous_* / *_change naming;
+    # legacy downstream code expects the user-facing delta_* aliases as well.
+    for var in NUMERICAL_VARIABLES:
+        current_key = f"current_{var}"
+        previous_key = f"previous_{var}"
+        delta_key = f"delta_{var}"
+        change_key = f"{var}_change"
+        rate_key = f"{var}_rate"
+
+        if delta_key not in normalized and change_key in normalized:
+            normalized[delta_key] = normalized[change_key]
+        if change_key not in normalized and delta_key in normalized:
+            normalized[change_key] = normalized[delta_key]
+        if current_key not in normalized and var in normalized:
+            normalized[current_key] = normalized[var]
+        if previous_key not in normalized and f"prev_{var}" in normalized:
+            normalized[previous_key] = normalized[f"prev_{var}"]
+        if rate_key not in normalized and f"{var}_rate" in normalized:
+            normalized[rate_key] = normalized[f"{var}_rate"]
+
+    normalized.setdefault("is_first_visit", normalized.get("previous_visit_id") is None)
+    normalized.setdefault("has_previous_visit", normalized.get("previous_visit_id") is not None)
+    normalized.setdefault("current_smoking_status", normalized.get("current_smoking"))
+    normalized.setdefault("previous_smoking_status", normalized.get("previous_smoking"))
+    normalized.setdefault("smoking_status_changed", normalized.get("smoking_changed"))
+    normalized.setdefault("current_physical_activity", normalized.get("current_physical_activity"))
+    normalized.setdefault("previous_physical_activity", normalized.get("previous_physical_activity"))
+    normalized.setdefault("physical_activity_changed", normalized.get("physical_activity_changed"))
+    return normalized
+
 
 VARIABLE_METADATA = {
     "systolic_bp": {"label": "Systolic Blood Pressure", "unit": "mmHg", "type": "numerical"},
@@ -74,10 +113,10 @@ def normalize_smoking_value(val: Any) -> Optional[str]:
     if s is None:
         return None
     low = s.lower()
-    if low in {"1", "true", "yes", "smoker"}:
-        return "True"
-    if low in {"0", "false", "no", "non-smoker"}:
-        return "False"
+    if low in {"1", "true", "yes", "y", "smoker", "current smoker"}:
+        return "Yes"
+    if low in {"0", "false", "no", "n", "non-smoker", "never", "non smoker"}:
+        return "No"
     return s.capitalize()
 
 
@@ -132,6 +171,9 @@ class TemporalFeatureService:
             "has_previous_visit": not is_first_visit,
         }
 
+        # Legacy compatibility: older callers expect delta_* keys immediately in the snapshot payload.
+        # The canonical fields are still stored under *_change, but the alias is exposed here for tests and API compatibility.
+
         # ── 1. Calculate 8 Critical Numerical Changes and Rates ──────────────
         numerical_details: Dict[str, Dict[str, Optional[float]]] = {}
         for var in NUMERICAL_VARIABLES:
@@ -142,19 +184,14 @@ class TemporalFeatureService:
             if is_first_visit or previous_data is None:
                 prev_val = None
                 change_val = None
-                rate_val = None
             else:
                 prev_raw = previous_data.get(var)
                 prev_val = _safe_float(prev_raw)
                 if curr_val is not None and prev_val is not None:
                     change_val = round(curr_val - prev_val, 2)
-                    if days_between is not None and days_between > 0:
-                        rate_val = round(change_val / days_between, 4)
-                    else:
-                        rate_val = 0.0
                 else:
                     change_val = None
-                    rate_val = None
+            rate_val = None
 
             snapshot[f"previous_{var}"] = prev_val
             snapshot[f"prev_{var}"] = prev_val
@@ -235,7 +272,7 @@ class TemporalFeatureService:
         snapshot["numerical_details"] = numerical_details
         snapshot["categorical_details"] = categorical_details
 
-        return snapshot
+        return normalize_legacy_temporal_snapshot(snapshot)
 
     @staticmethod
     def get_immediately_previous_visit(
@@ -312,6 +349,7 @@ class TemporalFeatureService:
             temp_record = TemporalPatientData(patient_id=str(patient_id))
             session.add(temp_record)
 
+        temp_record.source_dataset = cur_dict.get("source_dataset")
         temp_record.current_visit_id = snapshot["current_visit_id"]
         temp_record.previous_visit_id = snapshot["previous_visit_id"]
         temp_record.current_visit_date = snapshot["current_visit_date"]
@@ -408,10 +446,10 @@ class TemporalFeatureService:
         """)).scalar() or 0
 
         max_visits = session.execute(text("""
-            SELECT COALESCE(MAX(cnt), 1) FROM (
+            SELECT COALESCE(MAX(cnt), 0) FROM (
                 SELECT COUNT(*) as cnt FROM patient_visits GROUP BY patient_id
             ) s
-        """)).scalar() or 1
+        """)).scalar() or 0
 
         avg_visits = round(float(total_visits) / float(max(total_patients, 1)), 2)
 
