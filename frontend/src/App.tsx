@@ -6,6 +6,7 @@ import Assessment from './pages/Assessment';
 import NewAssessment from './pages/NewAssessment';
 import Analytics from './pages/Analytics';
 import About from './pages/About';
+import IncrementalLearning from './pages/IncrementalLearning';
 import './App.css';
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
             <Route path="/assessment" element={<Assessment />} />
             <Route path="/new-assessment" element={<NewAssessment />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/incremental-learning" element={<IncrementalLearning />} />
             <Route path="/about" element={<About />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -1,0 +1,29 @@
+feature,data_type,missing_percentage,target_leakage_risk,used,reason
+patient_id,str,0.0,identifier,False,identifier/visit metadata; used only for grouping and chronology
+visit_number,int64,0.0,identifier,False,identifier/visit metadata; used only for grouping and chronology
+visit_date,str,0.0,identifier,False,identifier/visit metadata; used only for grouping and chronology
+age,int64,0.0,low,True,approved clinical/lifestyle input
+gender,str,0.0,low,True,approved clinical/lifestyle input
+bmi,float64,4.022959770402296,low,True,approved clinical/lifestyle input
+chest_pain_type,str,1.0409895901040989,low,True,approved clinical/lifestyle input
+systolic_bp,float64,2.4149758502414973,low,True,approved clinical/lifestyle input
+diastolic_bp,float64,2.4789752102478975,low,True,approved clinical/lifestyle input
+resting_heart_rate,float64,2.056979430205698,low,True,approved clinical/lifestyle input
+max_heart_rate,float64,2.003979960200398,low,True,approved clinical/lifestyle input
+cholesterol,float64,6.242937570624293,low,True,approved clinical/lifestyle input
+hdl,float64,6.864931350686493,low,True,approved clinical/lifestyle input
+ldl,float64,6.244937550624494,low,True,approved clinical/lifestyle input
+fasting_blood_sugar,object,1.5309846901530986,low,True,approved clinical/lifestyle input
+hba1c,float64,5.168948310516895,low,True,approved clinical/lifestyle input
+diabetes,object,0.953990460095399,low,True,approved clinical/lifestyle input
+resting_ecg,str,3.8659613403865962,low,True,approved clinical/lifestyle input
+exercise_angina,object,1.022989770102299,low,True,approved clinical/lifestyle input
+oldpeak,float64,4.459955400445995,low,True,approved clinical/lifestyle input
+st_slope,str,1.5099849001509984,low,True,approved clinical/lifestyle input
+num_major_vessels,float64,1.2229877701222989,low,True,approved clinical/lifestyle input
+thalassemia,str,4.0729592704072966,low,True,approved clinical/lifestyle input
+smoking,object,0.965990340096599,low,True,approved clinical/lifestyle input
+family_history,object,1.5119848801511986,low,True,approved clinical/lifestyle input
+physical_activity,str,1.948980510194898,low,True,approved clinical/lifestyle input
+stress_level,float64,1.5849841501584985,low,True,approved clinical/lifestyle input
+prediction,int8,0.0,target,False,ground-truth target; excluded from model inputs

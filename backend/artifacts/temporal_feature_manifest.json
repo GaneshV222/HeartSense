@@ -1,4 +1,44 @@
 {
+  "training_run_id": "20261013T194501776070Z-93b6b6f414fc",
+  "created_at": "2026-10-13T19:45:01.776070+00:00",
+  "dataset": {
+    "resolved_path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+    "sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db",
+    "real_source_rows": 100001
+  },
+  "sampler": "SMOTENC",
+  "sampler_configuration": {
+    "sampling_strategy": "auto",
+    "random_state": 42,
+    "k_neighbors": 5,
+    "categorical_feature_positions": [
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33
+    ]
+  },
+  "smote_counts": {
+    "real_source_rows": 100001,
+    "synthetic_rows_generated": 40001,
+    "synthetic_rows_saved_to_csv": 40001,
+    "synthetic_rows_saved_to_database": 40001,
+    "csv_path": "E:\\HeartSense\\backend\\artifacts\\smote_training_records.csv",
+    "database_table": "synthetic_training_samples"
+  },
+  "split": {
+    "method": "stratified 60/20/20 after SMOTENC",
+    "training_rows": 84001,
+    "validation_rows": 28000,
+    "test_rows": 28001
+  },
   "features": [
     "age",
     "gender",

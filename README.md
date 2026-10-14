@@ -135,7 +135,7 @@ HeartSense/
 
 ## 18. Limitations
 - Automatic medical report extraction (OCR) is not yet fully implemented; manual entry of clinical values is required.
-- Incremental Learning and Cross-Dataset Validation are out-of-scope for the current implementation.
+- Cross-Dataset Validation is out-of-scope for the current implementation.
 
 ## 19. Disclaimer
 This assessment tool is for research and decision-support purposes only. It is **not** a medical diagnosis. Consult a qualified healthcare professional for medical advice.

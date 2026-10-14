@@ -821,185 +821,6 @@ def train_model_suite(
 
 
 
-def store_smote_synthetic_visits(
-    X_original_proc: np.ndarray,
-    X_resampled_proc: np.ndarray,
-    y_resampled: np.ndarray,
-    preprocessor: ColumnTransformer,
-    baseline_feature_cols: List[str],
-    num_cols: List[str],
-    cat_cols: List[str],
-) -> Dict[str, Any]:
-    """
-    Inverse-transform the SMOTE-generated synthetic rows back to original
-    feature space and insert them into `patients` + `patient_visits`.
-
-    Only the rows BEYOND the original dataset (index >= len(X_original_proc))
-    are treated as synthetic. Real rows already exist in the DB.
-
-    Returns a dict with insert statistics.
-    """
-    raise RuntimeError(
-        "Synthetic SMOTE rows are stored as training records, not patient visits."
-    )
-    n_original = len(X_original_proc)
-    n_total = len(X_resampled_proc)
-    synthetic_proc = X_resampled_proc[n_original:]          # shape (n_synth, n_features)
-    synthetic_labels = np.asarray(y_resampled)[n_original:] # 0 or 1
-    n_synthetic = len(synthetic_proc)
-
-    if n_synthetic == 0:
-        print("[SMOTE-DB] No synthetic samples to store.")
-        return {"synthetic_rows_inserted": 0}
-
-    print(f"[SMOTE-DB] Inverse-transforming {n_synthetic} synthetic SMOTE samples...")
-
-    # ─── Build per-transformer column index maps ───────────────────────────
-    # ColumnTransformer processes num_cols first, then cat_cols.
-    # After fit_transform the output columns are:
-    #   [scaled_num_0 ... scaled_num_N | ohe_col_0 ... ohe_col_M]
-    num_transformer = None
-    cat_transformer = None
-    num_start = 0
-    cat_start = 0
-
-    for tname, trans, tcols in preprocessor.transformers_:
-        if tname == "num":
-            num_transformer = trans
-            num_start = 0
-            cat_start = len(tcols)
-        elif tname == "cat":
-            cat_transformer = trans
-
-    # ─── Inverse-transform numerical columns (StandardScaler) ─────────────
-    recovered = {col: [None] * n_synthetic for col in baseline_feature_cols}
-
-    if num_transformer is not None and num_cols:
-        scaler: StandardScaler = num_transformer.named_steps["scaler"]
-        n_num = len(num_cols)
-        X_num_scaled = synthetic_proc[:, num_start:num_start + n_num]
-        X_num_orig = scaler.inverse_transform(X_num_scaled)
-        for j, col in enumerate(num_cols):
-            if col in baseline_feature_cols:
-                recovered[col] = X_num_orig[:, j].tolist()
-
-    # ─── Inverse-transform categorical columns (OneHotEncoder) ────────────
-    if cat_transformer is not None and cat_cols:
-        ohe: OneHotEncoder = cat_transformer.named_steps["onehot"]
-        n_num_feats = len(num_cols) if num_cols else 0
-        X_cat_ohe = synthetic_proc[:, n_num_feats:]
-        # Round to nearest integer to get a valid one-hot row
-        X_cat_rounded = np.round(X_cat_ohe).clip(0, 1)
-        try:
-            X_cat_orig = ohe.inverse_transform(X_cat_rounded)  # shape (n_synth, len(cat_cols))
-        except Exception:
-            # Fallback: take argmax per category group
-            X_cat_orig = np.empty((n_synthetic, len(cat_cols)), dtype=object)
-            offset = 0
-            for j, cat_col in enumerate(cat_cols):
-                n_cats = len(ohe.categories_[j])
-                group = X_cat_ohe[:, offset:offset + n_cats]
-                idx = np.argmax(group, axis=1)
-                X_cat_orig[:, j] = np.array(ohe.categories_[j])[idx]
-                offset += n_cats
-        for j, col in enumerate(cat_cols):
-            if col in baseline_feature_cols:
-                col_vals = X_cat_orig[:, j].tolist()
-                recovered[col] = [
-                    str(v) if v is not None else None for v in col_vals
-                ]
-
-    # ─── Build DataFrames for bulk insert ─────────────────────────────────
-    synth_df = pd.DataFrame(recovered)  # shape (n_synthetic, 24)
-    synth_df["prediction"] = synthetic_labels.tolist()
-    synth_df["is_synthetic"] = True
-
-    # Synthetic patient IDs: SMOTE_000001 … SMOTE_NNNNNN
-    synth_ids = [f"SMOTE_{i+1:06d}" for i in range(n_synthetic)]
-    synth_df["patient_id"] = synth_ids
-
-    now = datetime.utcnow()
-    synth_df["visit_number"] = 1
-    synth_df["visit_date"] = now
-    synth_df["visit_timestamp"] = now
-    synth_df["created_at"] = now
-    synth_df["updated_at"] = now
-
-    # Ensure smoking_status mirrors smoking
-    if "smoking" in synth_df.columns and "smoking_status" not in synth_df.columns:
-        synth_df["smoking_status"] = synth_df["smoking"]
-    elif "smoking_status" not in synth_df.columns:
-        synth_df["smoking_status"] = None
-
-    # Replace NaN with None for SQL
-    synth_df = synth_df.where(pd.notnull(synth_df), None)
-
-    batch_size = 5000
-
-    # 1. Insert into `patients` (synthetic patients)
-    patients_rows = [
-        {
-            "patient_id": pid,
-            "name": f"Synthetic Patient {pid}",
-            "gender": str(synth_df.loc[i, "gender"]) if "gender" in synth_df.columns else None,
-            "age": float(synth_df.loc[i, "age"]) if "age" in synth_df.columns and synth_df.loc[i, "age"] is not None else None,
-            "created_at": now,
-        }
-        for i, pid in enumerate(synth_ids)
-    ]
-
-    print(f"[SMOTE-DB] Inserting {len(patients_rows)} synthetic patients into 'patients'...")
-    with engine.begin() as con:
-        for i in range(0, len(patients_rows), batch_size):
-            con.execute(text("""
-                INSERT INTO patients (patient_id, name, gender, age, created_at)
-                VALUES (:patient_id, :name, :gender, :age, :created_at)
-                ON CONFLICT (patient_id) DO NOTHING
-            """), patients_rows[i:i + batch_size])
-
-    # 2. Insert into `patient_visits`
-    visit_records = synth_df.to_dict(orient="records")
-    for r in visit_records:
-        for k, v in list(r.items()):
-            if v is not None and isinstance(v, float) and np.isnan(v):
-                r[k] = None
-
-    print(f"[SMOTE-DB] Inserting {len(visit_records)} synthetic visits into 'patient_visits'...")
-    with engine.begin() as con:
-        for i in range(0, len(visit_records), batch_size):
-            con.execute(text("""
-                INSERT INTO patient_visits (
-                    patient_id, visit_number, visit_date, visit_timestamp,
-                    age, gender, bmi, chest_pain_type, systolic_bp, diastolic_bp,
-                    resting_heart_rate, max_heart_rate, cholesterol, hdl, ldl,
-                    fasting_blood_sugar, hba1c, diabetes, resting_ecg, exercise_angina,
-                    oldpeak, st_slope, num_major_vessels, thalassemia, smoking,
-                    smoking_status, family_history, physical_activity, stress_level,
-                    prediction, is_synthetic, created_at, updated_at
-                )
-                VALUES (
-                    :patient_id, :visit_number, :visit_date, :visit_timestamp,
-                    :age, :gender, :bmi, :chest_pain_type, :systolic_bp, :diastolic_bp,
-                    :resting_heart_rate, :max_heart_rate, :cholesterol, :hdl, :ldl,
-                    :fasting_blood_sugar, :hba1c, :diabetes, :resting_ecg, :exercise_angina,
-                    :oldpeak, :st_slope, :num_major_vessels, :thalassemia, :smoking,
-                    :smoking_status, :family_history, :physical_activity, :stress_level,
-                    :prediction, :is_synthetic, :created_at, :updated_at
-                )
-            """), visit_records[i:i + batch_size])
-
-    total_in_db = n_original + n_synthetic
-    print(f"[SMOTE-DB] Done! patient_visits now has {total_in_db} total rows:")
-    print(f"  • Real visits   : {n_original}")
-    print(f"  • Synthetic rows: {n_synthetic} (SMOTE-generated)")
-
-    return {
-        "real_visits": n_original,
-        "synthetic_rows_inserted": n_synthetic,
-        "total_visits_in_db": total_in_db,
-    }
-
-
 def run_temporal_training_pipeline(dataset_path: str | None = None) -> Dict[str, Any]:
     """
     Run complete HeartSense ML/DL pipeline:
@@ -1744,6 +1565,8 @@ def run_temporal_training_pipeline(
     backup_path: str | None = None,
     expected_database: str | None = None,
     store_smote_database: bool = False,
+    training_run_id: str | None = None,
+    promote_model: bool = True,
 ) -> Dict[str, Any]:
     """Run the verified SMOTE-before-split training workflow; database replacement is opt-in."""
     from app.config import TEMPORAL_DATASET_PATH
@@ -1756,6 +1579,8 @@ def run_temporal_training_pipeline(
         backup_path=backup_path,
         expected_database=expected_database,
         store_smote_database=store_smote_database,
+        training_run_id=training_run_id,
+        promote_model=promote_model,
     )
     report["best_name"] = report["optimized"]["model"]
     return report
@@ -1783,7 +1608,8 @@ def ingest_dataset_to_postgresql(
 
 def store_smote_synthetic_visits(*args: Any, **kwargs: Any) -> None:
     raise RuntimeError(
-        "Synthetic SMOTE rows are stored in smote_training_records, not patient_visits."
+        "Synthetic SMOTE rows are training-only; use --store-smote-database to persist them "
+        "in synthetic_training_samples."
     )
 
 

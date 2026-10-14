@@ -49,8 +49,10 @@ if not os.path.exists(MODEL_ARTIFACT_DIR):
 # Database
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres:VishnuS%402023@127.0.0.1:5432/heartsense"
+    "",
 )
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be configured for the PostgreSQL database")
 
 # ML Pipeline Configuration
 TEST_SIZE = 0.2

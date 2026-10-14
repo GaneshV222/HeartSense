@@ -94,7 +94,7 @@ def test_temporal_features_use_only_same_patient_previous_visit():
             assert generated[f"delta_{variable}"] == current[variable] - previous[variable]
 
 
-def test_smote_is_applied_before_split_to_complete_dataset():
+def test_historical_diagnostic_smote_runs_before_split_to_complete_dataset():
     featured, labels = get_feature_data()
     _, matrix, resampled_labels, records, metadata, smote_info = (
         _fit_preprocessor_and_smote_before_split(featured, labels)
@@ -105,7 +105,8 @@ def test_smote_is_applied_before_split_to_complete_dataset():
     assert smote_info["after"] == {"0": 70001, "1": 70001}
     assert smote_info["samples_after"] == 140002
     assert smote_info["synthetic_samples_created"] == 40001
-    assert smote_info["applied_to"] == "full 100001-row dataset before train/validation/test split"
+    assert "full 100001-row dataset before" in smote_info["applied_to"]
+    assert smote_info["synthetic_training_partition_count"] is None
     assert len(matrix) == len(resampled_labels) == len(records) == len(metadata)
     assert int(metadata["is_synthetic"].sum()) == 40001
     assert list(records.columns) == list(MODEL_FEATURE_COLUMNS)

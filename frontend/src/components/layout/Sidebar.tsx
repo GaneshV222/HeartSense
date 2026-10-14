@@ -1,5 +1,5 @@
 ﻿import { NavLink } from 'react-router-dom';
-import { HeartPulse, Home, Search, PlusCircle, BarChart2, Info } from 'lucide-react';
+import { HeartPulse, Home, Search, PlusCircle, BarChart2, Info, BrainCircuit } from 'lucide-react';
 
 export default function Sidebar() {
   const linkStyle = {
@@ -41,6 +41,9 @@ export default function Sidebar() {
         </NavLink>
         <NavLink to="/analytics" style={({ isActive }) => isActive ? activeStyle : linkStyle}>
           <BarChart2 size={20} style={{ marginRight: '0.75rem' }} /> Analytics
+        </NavLink>
+        <NavLink to="/incremental-learning" style={({ isActive }) => isActive ? activeStyle : linkStyle}>
+          <BrainCircuit size={20} style={{ marginRight: '0.75rem' }} /> Incremental Learning
         </NavLink>
         <NavLink to="/about" style={({ isActive }) => isActive ? activeStyle : linkStyle}>
           <Info size={20} style={{ marginRight: '0.75rem' }} /> About

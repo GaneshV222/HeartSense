@@ -1,7 +1,14 @@
 {
+  "training_run_id": "20261013T194501776070Z-93b6b6f414fc",
+  "created_at": "2026-10-13T19:45:01.776070+00:00",
+  "dataset_provenance": {
+    "resolved_path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+    "sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db",
+    "real_source_rows": 100001
+  },
   "best_name": "XGBoost baseline",
   "dataset": {
-    "path": "E:\\Heart\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+    "path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
     "filename": "heart_disease_prediction_2026.csv",
     "rows": 100001,
     "columns": [
@@ -97,11 +104,11 @@
     "source_dtypes": {
       "patient_id": "string",
       "visit_number": "int64",
-      "visit_date": "datetime64[ns]",
+      "visit_date": "datetime64[us]",
       "age": "int64",
-      "gender": "object",
+      "gender": "str",
       "bmi": "float64",
-      "chest_pain_type": "object",
+      "chest_pain_type": "str",
       "systolic_bp": "float64",
       "diastolic_bp": "float64",
       "resting_heart_rate": "float64",
@@ -109,18 +116,18 @@
       "cholesterol": "float64",
       "hdl": "float64",
       "ldl": "float64",
-      "fasting_blood_sugar": "object",
+      "fasting_blood_sugar": "str",
       "hba1c": "float64",
-      "diabetes": "object",
-      "resting_ecg": "object",
-      "exercise_angina": "object",
+      "diabetes": "str",
+      "resting_ecg": "str",
+      "exercise_angina": "str",
       "oldpeak": "float64",
-      "st_slope": "object",
+      "st_slope": "str",
       "num_major_vessels": "float64",
-      "thalassemia": "object",
-      "smoking": "object",
-      "family_history": "object",
-      "physical_activity": "object",
+      "thalassemia": "str",
+      "smoking": "str",
+      "family_history": "str",
+      "physical_activity": "str",
       "stress_level": "float64",
       "prediction": "int64"
     },
@@ -277,7 +284,7 @@
     }
   },
   "temporal_workbook_validation": {
-    "path": "E:\\Heart\\HeartSense\\backend\\data\\temporal_dataset.xlsx",
+    "path": "E:\\HeartSense\\backend\\data\\temporal_dataset.xlsx",
     "worksheet": "temporal_dataset",
     "rows": 99966,
     "columns": [
@@ -456,6 +463,46 @@
     "multi_visit_patients": 6
   },
   "feature_schema": {
+    "training_run_id": "20261013T194501776070Z-93b6b6f414fc",
+    "created_at": "2026-10-13T19:45:01.776070+00:00",
+    "dataset": {
+      "resolved_path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+      "sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db",
+      "real_source_rows": 100001
+    },
+    "sampler": "SMOTENC",
+    "sampler_configuration": {
+      "sampling_strategy": "auto",
+      "random_state": 42,
+      "k_neighbors": 5,
+      "categorical_feature_positions": [
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33
+      ]
+    },
+    "smote_counts": {
+      "real_source_rows": 100001,
+      "synthetic_rows_generated": 40001,
+      "synthetic_rows_saved_to_csv": 40001,
+      "synthetic_rows_saved_to_database": 40001,
+      "csv_path": "E:\\HeartSense\\backend\\artifacts\\smote_training_records.csv",
+      "database_table": "synthetic_training_samples"
+    },
+    "split": {
+      "method": "stratified 60/20/20 after SMOTENC",
+      "training_rows": 84001,
+      "validation_rows": 28000,
+      "test_rows": 28001
+    },
     "features": [
       "age",
       "gender",
@@ -560,7 +607,34 @@
     "test_rows": 28001,
     "smote_applied_before_split": true,
     "source_rows_before_smote": 100001,
-    "synthetic_rows": 40001,
+    "training_run_id": "20261013T194501776070Z-93b6b6f414fc",
+    "real_source_rows": 100001,
+    "synthetic_rows_generated": 40001,
+    "synthetic_rows_saved_to_csv": 40001,
+    "synthetic_rows_saved_to_database": 40001,
+    "sampler": "SMOTENC",
+    "sampler_configuration": {
+      "sampling_strategy": "auto",
+      "random_state": 42,
+      "k_neighbors": 5,
+      "categorical_feature_positions": [
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33
+      ]
+    },
+    "csv_path": "E:\\HeartSense\\backend\\artifacts\\smote_training_records.csv",
+    "database_persistence_enabled": true,
+    "database_table": "synthetic_training_samples",
+    "dataset_sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db",
     "test_distribution_untouched": false
   },
   "smote": {
@@ -578,11 +652,29 @@
     "samples_after": 140002,
     "synthetic_samples_created": 40001,
     "algorithm": "SMOTENC",
+    "sampler_configuration": {
+      "sampling_strategy": "auto",
+      "random_state": 42,
+      "k_neighbors": 5,
+      "categorical_feature_positions": [
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33
+      ]
+    },
     "applied_to": "full 100001-row dataset before train/validation/test split",
     "validation_and_test_resampled": true,
     "synthetic_rows_persisted_as_visits": false,
-    "complete_records_export": "E:\\Heart\\HeartSense\\backend\\artifacts\\smote_training_records.csv",
-    "database_table": "smote_training_records"
+    "complete_records_export": "E:\\HeartSense\\backend\\artifacts\\smote_training_records.csv",
+    "database_table": "synthetic_training_samples"
   },
   "baseline": {
     "model": "XGBoost baseline",
@@ -652,7 +744,7 @@
       },
       "threshold": 0.5
     },
-    "training_seconds": 0.7449176000081934
+    "training_seconds": 0.9336964000031003
   },
   "optimized": {
     "model": "XGBoost baseline",
@@ -781,8 +873,8 @@
       },
       "threshold": 0.48
     },
-    "training_seconds": 0.7449176000081934,
-    "inference_milliseconds_per_row": 1.4300000038929284
+    "training_seconds": 0.9336964000031003,
+    "inference_milliseconds_per_row": 0.6576000014320016
   },
   "validation_candidates": {
     "XGBoost baseline": {
@@ -792,34 +884,122 @@
       "specificity": 0.9130714285714285,
       "f1": 0.9301131969345426,
       "roc_auc": 0.9831622959183673,
-      "threshold": 0.48
+      "pr_auc": 0.983294818937819,
+      "threshold": 0.48,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            12783,
+            1217
+          ],
+          [
+            771,
+            13229
+          ]
+        ],
+        "tn": 12783,
+        "fp": 1217,
+        "fn": 771,
+        "tp": 13229
+      },
+      "selection_score": 0.9427607911644238
     },
-    "XGBoost tuned shallow": {
-      "accuracy": 0.9191071428571429,
-      "precision": 0.9130006334905328,
-      "recall_sensitivity": 0.9265,
-      "specificity": 0.9117142857142857,
-      "f1": 0.9197007834934591,
-      "roc_auc": 0.9775706301020409,
-      "threshold": 0.51
+    "LightGBM Classifier": {
+      "accuracy": 0.9184285714285715,
+      "precision": 0.9022246635539687,
+      "recall_sensitivity": 0.9385714285714286,
+      "specificity": 0.8982857142857142,
+      "f1": 0.9200392101946506,
+      "roc_auc": 0.9776761479591837,
+      "pr_auc": 0.9777491465885897,
+      "threshold": 0.48,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            12576,
+            1424
+          ],
+          [
+            860,
+            13140
+          ]
+        ],
+        "tn": 12576,
+        "fp": 1424,
+        "fn": 860,
+        "tp": 13140
+      },
+      "selection_score": 0.9332821260831582
     },
-    "XGBoost tuned regularized": {
-      "accuracy": 0.9172857142857143,
-      "precision": 0.9075624389563276,
-      "recall_sensitivity": 0.9292142857142857,
-      "specificity": 0.9053571428571429,
-      "f1": 0.9182607468059575,
-      "roc_auc": 0.9768975204081635,
-      "threshold": 0.5
+    "Support Vector Machine (SVM)": {
+      "accuracy": 0.9171428571428571,
+      "precision": 0.9103428892636313,
+      "recall_sensitivity": 0.9254285714285714,
+      "specificity": 0.9088571428571428,
+      "f1": 0.9178237461037121,
+      "roc_auc": 0.9768084234693878,
+      "pr_auc": 0.9768948999623337,
+      "threshold": 0.51,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            12724,
+            1276
+          ],
+          [
+            1044,
+            12956
+          ]
+        ],
+        "tn": 12724,
+        "fp": 1276,
+        "fn": 1044,
+        "tp": 12956
+      },
+      "selection_score": 0.9333283614610909
     },
     "Random Forest": {
-      "accuracy": 0.9240357142857143,
-      "precision": 0.9079788330698921,
-      "recall_sensitivity": 0.9437142857142857,
-      "specificity": 0.9043571428571429,
-      "f1": 0.9255017337396239,
-      "roc_auc": 0.979224224489796,
-      "threshold": 0.49
+      "accuracy": 0.9241785714285714,
+      "precision": 0.9146128604342666,
+      "recall_sensitivity": 0.9357142857142857,
+      "specificity": 0.9126428571428571,
+      "f1": 0.9250432510680365,
+      "roc_auc": 0.979179719387755,
+      "pr_auc": 0.9786363587711515,
+      "threshold": 0.51,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            12777,
+            1223
+          ],
+          [
+            900,
+            13100
+          ]
+        ],
+        "tn": 12777,
+        "fp": 1223,
+        "fn": 900,
+        "tp": 13100
+      },
+      "selection_score": 0.9385725577067034
     },
     "Logistic Regression": {
       "accuracy": 0.9238214285714286,
@@ -828,7 +1008,29 @@
       "specificity": 0.9073571428571429,
       "f1": 0.9250553388847897,
       "roc_auc": 0.9800949030612245,
-      "threshold": 0.45999999999999996
+      "pr_auc": 0.9799202948690768,
+      "threshold": 0.45999999999999996,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            12703,
+            1297
+          ],
+          [
+            836,
+            13164
+          ]
+        ],
+        "tn": 12703,
+        "fp": 1297,
+        "fn": 836,
+        "tp": 13164
+      },
+      "selection_score": 0.9381207589733699
     },
     "Gradient Boosting alternative": {
       "accuracy": 0.8799285714285714,
@@ -837,8 +1039,51 @@
       "specificity": 0.8482142857142857,
       "f1": 0.8836194959844919,
       "roc_auc": 0.9555320102040815,
-      "threshold": 0.47
+      "pr_auc": 0.9556838230033382,
+      "threshold": 0.47,
+      "confusion_matrix": {
+        "labels": [
+          0,
+          1
+        ],
+        "matrix": [
+          [
+            11875,
+            2125
+          ],
+          [
+            1237,
+            12763
+          ]
+        ],
+        "tn": 11875,
+        "fp": 2125,
+        "fn": 1237,
+        "tp": 12763
+      },
+      "selection_score": 0.8988412345061689
     }
+  },
+  "model_selection_policy": {
+    "method": "weighted mean of validation accuracy, precision, sensitivity, specificity, F1, ROC-AUC, and PR-AUC",
+    "weights": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall_sensitivity": 1.0,
+      "specificity": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0
+    },
+    "selection_scores": {
+      "XGBoost baseline": 0.9427607911644238,
+      "LightGBM Classifier": 0.9332821260831582,
+      "Support Vector Machine (SVM)": 0.9333283614610909,
+      "Random Forest": 0.9385725577067034,
+      "Logistic Regression": 0.9381207589733699,
+      "Gradient Boosting alternative": 0.8988412345061689
+    },
+    "test_partition_used_for_selection": false
   },
   "cross_validation": {
     "baseline": {
@@ -1226,18 +1471,29 @@
   },
   "experimental_smote_before_split": null,
   "database_import": null,
-  "smote_database_import": {
+  "smote_database_storage": {
     "database": "heartsense",
-    "source_dataset": "heart_disease_prediction_2026.csv",
-    "run_id": "heart_disease_prediction_2026.csv:smote-before-split:20261012142320",
-    "records_before_table": 0,
-    "deleted_previous_source_records": 0,
-    "records_inserted": 140002,
-    "records_after_table": 140002,
-    "synthetic_records_inserted": 40001,
-    "real_records_inserted": 100001,
-    "table": "smote_training_records"
+    "table": "synthetic_training_samples",
+    "training_run_id": "20261013T194501776070Z-93b6b6f414fc",
+    "generated_rows": 40001,
+    "inserted_rows": 40001,
+    "existing_rows_on_retry": 0,
+    "verified_persisted_rows": 40001,
+    "dataset_path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+    "dataset_sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db"
   },
   "candidate_artifact_reloaded": true,
-  "active_artifact": "E:\\Heart\\HeartSense\\backend\\artifacts\\temporal_model_artifact.joblib"
+  "evaluation_protocol": "SMOTE-before-split diagnostic metrics; synthetic relatives can appear across partitions, so these are not an unseen-real-patient generalization estimate.",
+  "evaluation_artifacts": {
+    "predictions_path": "E:\\HeartSense\\backend\\artifacts\\evaluation_predictions.csv",
+    "predictions_sha256": "0dde4824acaf129d3c3740f80c2f0cdbe59179079e619e49d5ca0ad89f7df37b",
+    "prediction_rows": 28001,
+    "synthetic_rows_in_test": 8027,
+    "feature_rows_path": "E:\\HeartSense\\backend\\artifacts\\evaluation_features.csv",
+    "feature_rows_sha256": "d146edaed4c81c7462dab58ae3943cb9ad2cef4ef1d23baf5edcb5c202f67a88",
+    "curves_path": "E:\\HeartSense\\backend\\artifacts\\evaluation_curves.json"
+  },
+  "candidate_artifact": "E:\\HeartSense\\backend\\artifacts\\temporal_model_candidate.joblib",
+  "model_promoted": false,
+  "active_artifact": null
 }

@@ -1,0 +1,43 @@
+{
+  "timestamp_utc": "2026-10-14T17:40:07.139158+00:00",
+  "duration_seconds": 73.98,
+  "source_files": {
+    "core": {
+      "path": "E:\\HeartSense\\backend\\data\\heart_disease_prediction_2026.csv",
+      "sha256": "f5554b90d58195c61f1a5fe82e98a54e7d211f5e08851e9eee6fae78de5195db",
+      "rows": 100001
+    },
+    "temporal": {
+      "path": "E:\\HeartSense\\backend\\data\\temporal_dataset.xlsx",
+      "sha256": "0de513d308a27330793a87586866b515a0dc6075c788e892a6a931f4c0687a41",
+      "rows": 99966
+    }
+  },
+  "inserted_counts": {
+    "patients": 99966,
+    "patient_visits": 100001,
+    "temporal_patient_data": 99966,
+    "synthetic_samples": 0
+  },
+  "target_distribution": {
+    "0": 70001,
+    "1": 30000
+  },
+  "temporal_feature_mapping": {
+    "numerical_deltas": [
+      "systolic_bp",
+      "diastolic_bp",
+      "cholesterol",
+      "ldl",
+      "hdl",
+      "bmi",
+      "hba1c",
+      "resting_heart_rate"
+    ],
+    "lifestyle_changed": [
+      "smoking",
+      "physical_activity"
+    ],
+    "total_canonical_features": 34
+  }
+}

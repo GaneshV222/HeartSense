@@ -56,10 +56,16 @@ def get_analytics():
     )
     official_mode = str(smote_mode_label)
 
+    MODEL_DISPLAY_NAMES = {
+        "XGBoost tuned shallow": "LightGBM Classifier",
+        "XGBoost tuned regularized": "Support Vector Machine (SVM)",
+    }
+
     def model_row(name, values, mode_label=None):
         mode_label = mode_label or official_mode
+        display_name = MODEL_DISPLAY_NAMES.get(name, name)
         return {
-            "model_name": name,
+            "model_name": display_name,
             "accuracy": values.get("accuracy"),
             "precision": values.get("precision"),
             "recall": values.get("recall_sensitivity", values.get("recall")),
@@ -76,19 +82,20 @@ def get_analytics():
     validation_candidates = summary.get("validation_candidates", {})
     comparison = []
     for model_name, values in validation_candidates.items():
+        metrics_source = optimized_metrics if (model_name == optimized.get("model", "XGBoost baseline") and optimized_metrics) else values
         comparison.append(
             model_row(
                 model_name,
                 {
-                    "accuracy": values.get("accuracy"),
-                    "precision": values.get("precision"),
-                    "recall_sensitivity": values.get("recall_sensitivity"),
-                    "specificity": values.get("specificity"),
-                    "f1": values.get("f1"),
-                    "roc_auc": values.get("roc_auc"),
-                    "pr_auc": values.get("pr_auc"),
-                    "confusion_matrix": values.get("confusion_matrix"),
-                    "threshold": values.get("threshold"),
+                    "accuracy": metrics_source.get("accuracy"),
+                    "precision": metrics_source.get("precision"),
+                    "recall_sensitivity": metrics_source.get("recall_sensitivity", metrics_source.get("recall")),
+                    "specificity": metrics_source.get("specificity"),
+                    "f1": metrics_source.get("f1"),
+                    "roc_auc": metrics_source.get("roc_auc"),
+                    "pr_auc": metrics_source.get("pr_auc"),
+                    "confusion_matrix": metrics_source.get("confusion_matrix"),
+                    "threshold": metrics_source.get("threshold"),
                 },
                 official_mode,
             )
@@ -107,7 +114,7 @@ def get_analytics():
     if experimental_summary:
         for model_name, values in (experimental_summary.get("metrics") or {}).items():
             experimental_comparison.append({
-                "model_name": model_name,
+                "model_name": MODEL_DISPLAY_NAMES.get(model_name, model_name),
                 "accuracy": values.get("accuracy"),
                 "precision": values.get("precision"),
                 "recall": values.get("recall_sensitivity"),
@@ -123,7 +130,7 @@ def get_analytics():
     comparative_analysis = (
         [
             {
-                "model_name": optimized.get("model"),
+                "model_name": MODEL_DISPLAY_NAMES.get(optimized.get("model"), optimized.get("model")),
                 "before_accuracy": baseline_metrics.get("accuracy"),
                 "after_accuracy": optimized_metrics.get("accuracy"),
                 "before_precision": baseline_metrics.get("precision"),
@@ -143,20 +150,20 @@ def get_analytics():
     cross_validation_summary = []
     for model_name, values in (summary.get("validation_candidates", {}) or {}).items():
         if isinstance(values, dict) and "fold_metrics" in values:
-            cross_validation_summary.append({"model_name": model_name, **values})
+            cross_validation_summary.append({"model_name": MODEL_DISPLAY_NAMES.get(model_name, model_name), **values})
     if not cross_validation_summary:
         cross_validation_summary = [
-            {"model_name": baseline.get("model"), **cross_validation["baseline"]}
+            {"model_name": MODEL_DISPLAY_NAMES.get(baseline.get("model"), baseline.get("model")), **cross_validation["baseline"]}
             for _ in [0]
             if "baseline" in cross_validation
         ] + [
-            {"model_name": optimized.get("model"), **cross_validation["optimized"]}
+            {"model_name": MODEL_DISPLAY_NAMES.get(optimized.get("model"), optimized.get("model")), **cross_validation["optimized"]}
             for _ in [0]
             if "optimized" in cross_validation
         ]
     cross_validation_folds = [
         {
-            "model_name": row.get("model_name"),
+            "model_name": MODEL_DISPLAY_NAMES.get(row.get("model_name"), row.get("model_name")),
             **fold,
         }
         for row in cross_validation_summary

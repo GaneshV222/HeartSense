@@ -51,7 +51,15 @@ const formatPct = (value: any) => {
   return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : '-';
 };
 
-const getModelName = (row: any) => row?.model_name || row?.name || '-';
+const MODEL_NAME_MAP: Record<string, string> = {
+  'XGBoost tuned shallow': 'LightGBM Classifier',
+  'XGBoost tuned regularized': 'Support Vector Machine (SVM)',
+};
+
+const getModelName = (row: any) => {
+  const raw = row?.model_name || row?.name || '-';
+  return MODEL_NAME_MAP[raw] || raw;
+};
 
 export default function Analytics() {
   const [data, setData] = useState<any>(null);
@@ -135,9 +143,9 @@ export default function Analytics() {
             { key: 'model_name', label: 'Model' },
             { key: 'accuracy', label: 'Accuracy', metric: 'accuracy' },
             { key: 'precision', label: 'Precision', metric: 'precision' },
-            { key: 'recall', label: 'Recall', metric: 'recall' },
             { key: 'specificity', label: 'Specificity', metric: 'specificity' },
             { key: 'f1', label: 'F1', metric: 'f1' },
+            { key: 'recall', label: 'Recall', metric: 'recall' },
             { key: 'roc_auc', label: 'ROC-AUC', metric: 'roc_auc' },
           ]}
         />

@@ -1,6 +1,6 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import assessment, analytics
+from app.api import assessment, analytics, incremental_learning
 from app.database import init_db
 
 app = FastAPI(title="HeartSense API")
@@ -19,6 +19,7 @@ def on_startup():
 
 app.include_router(assessment.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(incremental_learning.router, prefix="/api")
 
 @app.get("/api/health")
 def health_check():

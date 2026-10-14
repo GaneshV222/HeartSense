@@ -1,0 +1,316 @@
+{
+  "Exp_A_Champion_Reference": {
+    "name": "Exp A: Reference Champion (Production XGBoost)",
+    "config": "Baseline XGBoost (n_estimators=70, max_depth=6, lr=0.1) on historical SMOTENC data",
+    "dataset": "Baseline 100,001 historical rows",
+    "sampling": "Historical global SMOTENC",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9246301479408237,
+      "accuracy_ci_95": [
+        0.9203,
+        0.9287
+      ],
+      "precision": 0.8396854204476709,
+      "recall_sensitivity": 0.9253333333333333,
+      "recall_ci_95": [
+        0.9173,
+        0.9327
+      ],
+      "specificity": 0.924328954882924,
+      "specificity_ci_95": [
+        0.9191,
+        0.9292
+      ],
+      "f1": 0.8804313352362829,
+      "roc_auc": 0.9798006007149355,
+      "pr_auc": 0.9575230058774543,
+      "tn": 9711,
+      "fp": 795,
+      "fn": 336,
+      "tp": 4164
+    }
+  },
+  "Exp_B_Champion_Proc_Plus_500": {
+    "name": "Exp B: Champion Procedure + 500 Real Records",
+    "config": "XGBoost baseline (n_estimators=70, max_depth=6, lr=0.1) with global SMOTE",
+    "dataset": "Baseline + 500 real records (100,501 rows)",
+    "sampling": "SMOTENC before split (40,227 synthetic samples)",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9215647074503532,
+      "accuracy_ci_95": [
+        0.9172,
+        0.9258
+      ],
+      "precision": 0.8315705448014369,
+      "recall_sensitivity": 0.926,
+      "recall_ci_95": [
+        0.918,
+        0.9333
+      ],
+      "specificity": 0.9196649533599848,
+      "specificity_ci_95": [
+        0.9143,
+        0.9247
+      ],
+      "f1": 0.8762485543055409,
+      "roc_auc": 0.979959398862026,
+      "pr_auc": 0.9577238367966838,
+      "tn": 9662,
+      "fp": 844,
+      "fn": 333,
+      "tp": 4167
+    }
+  },
+  "Exp_C_No_SMOTE": {
+    "name": "Exp C: No Synthetic Oversampling (Pure Real Data)",
+    "config": "XGBoost baseline on genuine real train partition only",
+    "dataset": "Real train partition (70,495 rows, 0 synthetic)",
+    "sampling": "None (No SMOTE)",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9254964680794349,
+      "accuracy_ci_95": [
+        0.9212,
+        0.9296
+      ],
+      "precision": 0.8939888164026095,
+      "recall_sensitivity": 0.8526666666666667,
+      "recall_ci_95": [
+        0.842,
+        0.8627
+      ],
+      "specificity": 0.9566914144298496,
+      "specificity_ci_95": [
+        0.9526,
+        0.9604
+      ],
+      "f1": 0.8728389444949954,
+      "roc_auc": 0.9784454385853585,
+      "pr_auc": 0.9555524357543899,
+      "tn": 10051,
+      "fp": 455,
+      "fn": 663,
+      "tp": 3837
+    }
+  },
+  "Exp_D_Train_Only_SMOTE": {
+    "name": "Exp D: Leakage-Safe SMOTENC (Train Partition Only)",
+    "config": "SMOTENC applied exclusively to training partition; zero test/val contamination",
+    "dataset": "Train partition resampled to 50:50 balance",
+    "sampling": "SMOTENC on train only (k=5)",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9093695854991337,
+      "accuracy_ci_95": [
+        0.9047,
+        0.9139
+      ],
+      "precision": 0.8174282248281439,
+      "recall_sensitivity": 0.8984444444444445,
+      "recall_ci_95": [
+        0.8893,
+        0.9069
+      ],
+      "specificity": 0.9140491147915477,
+      "specificity_ci_95": [
+        0.9085,
+        0.9193
+      ],
+      "f1": 0.8560237137412662,
+      "roc_auc": 0.9732538232121328,
+      "pr_auc": 0.9447597165333457,
+      "tn": 9603,
+      "fp": 903,
+      "fn": 457,
+      "tp": 4043
+    }
+  },
+  "Exp_E_Class_Weighting": {
+    "name": "Exp E: Algorithmic Class Weighting (scale_pos_weight)",
+    "config": "XGBoost with scale_pos_weight=2.34 (loss adjustment, no synthetic rows)",
+    "dataset": "Real train partition (70,495 rows)",
+    "sampling": "scale_pos_weight=2.34",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9117019858723178,
+      "accuracy_ci_95": [
+        0.9071,
+        0.9161
+      ],
+      "precision": 0.8052297635070179,
+      "recall_sensitivity": 0.9306666666666666,
+      "recall_ci_95": [
+        0.9229,
+        0.9377
+      ],
+      "specificity": 0.9035789072910718,
+      "specificity_ci_95": [
+        0.8978,
+        0.9091
+      ],
+      "f1": 0.8634161426657045,
+      "roc_auc": 0.9779387016942699,
+      "pr_auc": 0.9542234377129106,
+      "tn": 9493,
+      "fp": 1013,
+      "fn": 312,
+      "tp": 4188
+    }
+  },
+  "Exp_F_Hyperparameter_Tuned": {
+    "name": "Exp F: Bounded Regularized Hyperparameter Search",
+    "config": "Tuned XGBoost {'max_depth': 6, 'learning_rate': 0.08, 'n_estimators': 90, 'subsample': 0.9, 'colsample_bytree': 0.9, 'reg_lambda': 2.0, 'reg_alpha': 0.05}",
+    "dataset": "Real train partition (70,495 rows)",
+    "sampling": "scale_pos_weight=2.34",
+    "threshold": 0.48,
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9160335865653738,
+      "accuracy_ci_95": [
+        0.9115,
+        0.9204
+      ],
+      "precision": 0.8127413127413128,
+      "recall_sensitivity": 0.9355555555555556,
+      "recall_ci_95": [
+        0.928,
+        0.9424
+      ],
+      "specificity": 0.9076718065867123,
+      "specificity_ci_95": [
+        0.902,
+        0.9131
+      ],
+      "f1": 0.8698347107438017,
+      "roc_auc": 0.9786895107557585,
+      "pr_auc": 0.955407463542405,
+      "tn": 9536,
+      "fp": 970,
+      "fn": 290,
+      "tp": 4210
+    }
+  },
+  "Exp_G_Feature_Quality": {
+    "name": "Exp G: Temporal Feature Quality & Missingness",
+    "config": "Analyzed performance stratified by longitudinal history availability",
+    "dataset": "Golden Benchmark stratified by visit_number",
+    "first_visit_metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9159719906635545,
+      "accuracy_ci_95": [
+        0.9114,
+        0.9203
+      ],
+      "precision": 0.8127413127413128,
+      "recall_sensitivity": 0.9355555555555556,
+      "recall_ci_95": [
+        0.928,
+        0.9424
+      ],
+      "specificity": 0.9075750357313006,
+      "specificity_ci_95": [
+        0.9019,
+        0.913
+      ],
+      "f1": 0.8698347107438017,
+      "roc_auc": 0.9786714308400826,
+      "pr_auc": 0.955410600788277,
+      "tn": 9525,
+      "fp": 970,
+      "fn": 290,
+      "tp": 4210
+    },
+    "followup_visit_metrics": {
+      "threshold": 0.48,
+      "accuracy": 1.0,
+      "accuracy_ci_95": [
+        0.7412,
+        1.0
+      ],
+      "precision": 0.0,
+      "recall_sensitivity": 0.0,
+      "recall_ci_95": [
+        0.0,
+        0.0
+      ],
+      "specificity": 1.0,
+      "specificity_ci_95": [
+        0.7412,
+        1.0
+      ],
+      "f1": 0.0,
+      "roc_auc": NaN,
+      "pr_auc": 0.0,
+      "tn": 11,
+      "fp": 0,
+      "fn": 0,
+      "tp": 0
+    },
+    "metrics": {
+      "threshold": 0.48,
+      "accuracy": 0.9160335865653738,
+      "accuracy_ci_95": [
+        0.9115,
+        0.9204
+      ],
+      "precision": 0.8127413127413128,
+      "recall_sensitivity": 0.9355555555555556,
+      "recall_ci_95": [
+        0.928,
+        0.9424
+      ],
+      "specificity": 0.9076718065867123,
+      "specificity_ci_95": [
+        0.902,
+        0.9131
+      ],
+      "f1": 0.8698347107438017,
+      "roc_auc": 0.9786895107557585,
+      "pr_auc": 0.955407463542405,
+      "tn": 9536,
+      "fp": 970,
+      "fn": 290,
+      "tp": 4210
+    }
+  },
+  "Exp_H_Threshold_Optimized": {
+    "name": "Exp H: Validation-Selected Operating Threshold",
+    "config": "Tuned XGBoost at validation-selected threshold 0.490",
+    "dataset": "Golden Benchmark (unseen real patients)",
+    "sampling": "scale_pos_weight=2.34",
+    "threshold": 0.49,
+    "metrics": {
+      "threshold": 0.49,
+      "accuracy": 0.916899906703985,
+      "accuracy_ci_95": [
+        0.9124,
+        0.9212
+      ],
+      "precision": 0.8167478091528725,
+      "recall_sensitivity": 0.932,
+      "recall_ci_95": [
+        0.9243,
+        0.939
+      ],
+      "specificity": 0.910432134018656,
+      "specificity_ci_95": [
+        0.9048,
+        0.9157
+      ],
+      "f1": 0.8705760249091853,
+      "roc_auc": 0.9786895107557585,
+      "pr_auc": 0.955407463542405,
+      "tn": 9565,
+      "fp": 941,
+      "fn": 306,
+      "tp": 4194
+    }
+  }
+}

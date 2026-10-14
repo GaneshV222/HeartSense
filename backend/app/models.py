@@ -14,9 +14,29 @@ from datetime import datetime
 from sqlalchemy import (
     Column, Integer, Float, String, DateTime, ForeignKey, Text, JSON, Boolean,
 )
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.types import TypeDecorator
+from sqlalchemy.orm import declarative_base, relationship, synonym
 
 Base = declarative_base()
+
+
+class StressLevelType(TypeDecorator):
+    """Stores stress_level as VARCHAR in PostgreSQL while presenting it as float to Python."""
+    impl = String(50)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return str(value)
 
 
 class Patient(Base):
@@ -105,7 +125,19 @@ class PatientVisit(Base):
     smoking_status = Column(String(50), nullable=True)
     family_history = Column(String(50), nullable=True)
     physical_activity = Column(String(100), nullable=True)
-    stress_level = Column(Float, nullable=True)
+    stress_level = Column(StressLevelType, nullable=True)
+
+    # ── Canonical 10 Temporal Features ───────────────────────────
+    delta_systolic_bp = Column(Float, nullable=True)
+    delta_diastolic_bp = Column(Float, nullable=True)
+    delta_cholesterol = Column(Float, nullable=True)
+    delta_ldl = Column(Float, nullable=True)
+    delta_hdl = Column(Float, nullable=True)
+    delta_bmi = Column(Float, nullable=True)
+    delta_hba1c = Column(Float, nullable=True)
+    delta_resting_heart_rate = Column(Float, nullable=True)
+    smoking_changed = Column(Boolean, nullable=True)
+    physical_activity_changed = Column(Boolean, nullable=True)
 
     prediction = Column(Integer, nullable=True)  # 0 or 1 dataset target
     is_synthetic = Column(Boolean, nullable=False, default=False)  # True for SMOTE-generated rows
@@ -446,3 +478,63 @@ class ModelRun(Base):
 
     def __repr__(self):
         return f"<ModelRun {self.model_name} ({self.model_type}) @ {self.created_at}>"
+
+
+class SyntheticTrainingSample(Base):
+    """Run-scoped SMOTE synthetic training samples, isolated from clinical data."""
+    __tablename__ = "synthetic_training_samples"
+
+    synthetic_id = Column(Integer, primary_key=True, autoincrement=True)
+    source_batch_id = Column(String(100), nullable=True)
+    training_run_id = Column(String(255), nullable=True, index=True)
+    sample_index = Column(Integer, nullable=True)
+    dataset_path = Column(Text, nullable=True)
+    dataset_sha256 = Column(String(64), nullable=True)
+    generation_method = Column(String(50), nullable=False, default="SMOTENC")
+    is_synthetic = Column(Boolean, nullable=False, default=True)
+    training_only = Column(Boolean, nullable=False, default=True)
+    feature_values = Column(JSON, nullable=True)
+    feature_payload = synonym("feature_values")
+    feature_schema_version = Column(String(50), nullable=True)
+    sampler_configuration = Column(JSON, nullable=True)
+    target = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IncrementalLearningBatch(Base):
+    """Tracked import batches for real clinical records."""
+    __tablename__ = "learning_import_batches"
+
+    batch_id = Column(String(100), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True, index=True)
+    source_filename = Column(String(255), nullable=False)
+    source_sha256 = Column(String(64), nullable=False)
+    temporal_filename = Column(String(255), nullable=True)
+    temporal_sha256 = Column(String(64), nullable=True)
+    source_path = Column(Text, nullable=False)
+    status = Column(String(30), nullable=False, default="validated", index=True)
+    validation_report = Column(JSON, nullable=False)
+    accepted_rows = Column(Integer, nullable=False, default=0)
+    rejected_rows = Column(Integer, nullable=False, default=0)
+    duplicate_rows = Column(Integer, nullable=False, default=0)
+    missing_value_cells = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    confirmed_at = Column(DateTime, nullable=True)
+
+
+class IncrementalTrainingRun(Base):
+    """Run-scoped Challenger state and persisted evaluation lineage."""
+    __tablename__ = "learning_training_runs"
+
+    training_run_id = Column(String(100), primary_key=True)
+    idempotency_key = Column(String(100), nullable=True, unique=True, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    artifact_path = Column(Text, nullable=True)
+    manifest_path = Column(Text, nullable=True)
+    dataset_sha256 = Column(String(64), nullable=True)
+    dataset_rows = Column(Integer, nullable=True)
+    report = Column(JSON, nullable=True)
+    decision = Column(String(30), nullable=True)
+    decision_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
